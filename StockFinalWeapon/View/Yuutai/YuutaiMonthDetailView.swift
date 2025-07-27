@@ -43,16 +43,10 @@ struct YuutaiMonthDetailView: View {
     let month: SelectedMonth
 
     var verificationRange: String {
-        let start = purchaseDate.formatted(
-            .dateTime
-              .month(.twoDigits)
-              .day(.twoDigits)
-        )
-        let end = saleDate.formatted(
-            .dateTime
-              .month(.twoDigits)
-              .day(.twoDigits)
-        )
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d"
+        let start = formatter.string(from: purchaseDate)
+        let end = formatter.string(from: saleDate)
         return "\(month.ja)権利: \(start) 〜 \(end)"
     }
 
@@ -60,7 +54,7 @@ struct YuutaiMonthDetailView: View {
         VStack {
             HStack {
                 let count = stockCount == 0 ? "--" : stockCount.description
-                Text("\(month.ja)優待, 対象銘柄数: \(count)")
+                Text("\(month.ja)優待  対象銘柄数: \(count)")
                 Spacer()
             }
             .padding(.horizontal)
