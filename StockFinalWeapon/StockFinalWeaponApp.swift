@@ -11,7 +11,7 @@ import SwiftUI
 struct StockFinalWeaponApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            HomeTabView()
         }
     }
 }

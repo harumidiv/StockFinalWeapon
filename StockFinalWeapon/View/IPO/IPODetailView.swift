@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftSoup
+import SwiftYFinance
 
 struct IPODetailView: View {
     let priceRizeParcentage: Float
