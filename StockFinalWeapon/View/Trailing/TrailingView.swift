@@ -52,6 +52,7 @@ enum WinOrLose: String {
     case win = "勝ち"
     case lose = "負け"
     case unsettled = "未定"
+    case error = "エラー"
     
     var image: String {
         switch self {
@@ -61,6 +62,8 @@ enum WinOrLose: String {
             return "lose"
         case .unsettled:
             return "draw"
+        case .error:
+            return "error"
         }
     }
 }
@@ -77,63 +80,89 @@ struct StockCodeTag: Identifiable, Hashable {
     let market: Market
     let chartData: [StockChartData]
     
+    func winOrLose(start: Date, end: Date, profitFixed: Int, lossCut: Int) -> WinOrLose {
+        let rangeData = chartData.filter { chart in
+            if let date = chart.date {
+                return date >= start && date <= end
+            } else {
+                return false
+            }
+        }
+        
+        guard let startPrice = rangeData.first?.open else {
+            return .error
+        }
+        
+        var winOrLose: WinOrLose?
+        
+        rangeData.forEach { value in
+            guard let high = value.high, let low = value.low, winOrLose == nil else {
+                return
+            }
+            
+            let highPriceDifference = high - startPrice
+            let highPercent = highPriceDifference / startPrice * 100
+            // 高値が始まり値より高い + 高値が利確値よりも高い
+            if high >= startPrice && highPercent > Float(profitFixed) {
+                winOrLose = .win
+            }
+            
+            let lowPriceDifference = low - startPrice
+            let lowParcent = lowPriceDifference / startPrice * 100
+            // 安値が始まり値よりも低い + 安値が損切り値よりも低い
+            if low <= startPrice && lowParcent < Float(-lossCut) {
+                winOrLose = .lose
+            }
+            
+            print("code: \(code), high: \(high), low: \(low), highPercent: \(highPercent), lowParcent: \(lowParcent)")
+        }
+        return winOrLose ?? .unsettled
+    }
+    
     func hash(into hasher: inout Hasher) {
-            hasher.combine(id)
+        hasher.combine(id)
         hasher.combine(code)
         hasher.combine(market)
     }
-
+    
     static func == (lhs: StockCodeTag, rhs: StockCodeTag) -> Bool {
         return lhs.id == rhs.id &&
-               lhs.code == rhs.code &&
-               lhs.market == rhs.market
+        lhs.code == rhs.code &&
+        lhs.market == rhs.market
     }
 }
 
 
 struct TrailingView: View {
-    // TODO: 入力できるようにする
-    // TODO: 入力したものをTabで保存できるようにする
-    @State private var codeList: [String] = [
-        "2058", "8046", "6797", "5906", "3320", "5753", "8040", "6964"
-    ]
     @State private var stockCodeTags: [StockCodeTag] = []
-    
     @State private var selectedMarket: Market = .tokyo
-    @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+    @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
     @State private var endDate: Date = Date()
-    
-    let priceParcent:[Int] = ([Int])(-99...99)
-    
     @State private var lossCut: Int = 7
     @State private var profitFixed: Int = 7
-    @State private var stockList: [Stock] = []
+
     @FocusState private var isFocused: Bool
     @State private var code: String = ""
     @State private var market: Market = .tokyo
     
     @State private var isLoading: Bool = false
+    @State private var isPresenting = false
+    
+    private let priceParcent:[Int] = ([Int])(-99...99)
     
     var body: some View {
         NavigationStack {
-            Group {
+            ZStack {
+                stableView()
                 if isLoading {
                     loadingView()
-                } else {
-                    stableView()
                 }
             }
             .navigationTitle("トレイリング検証")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button (action: {
-                        isLoading = true
-                        stockList = []
-                        Task {
-                            codeList.forEach {
-                                fetchStockValue(code: $0)
-                            }
-                        }
+                        isPresenting = true
                         
                     }, label: {
                         HStack {
@@ -143,6 +172,15 @@ struct TrailingView: View {
                     })
                     .disabled(stockCodeTags.isEmpty)
                 }
+            }
+            .sheet(isPresented: $isPresenting) {
+                TrailingResultView(
+                    stockList: $stockCodeTags,
+                    startDate: $startDate,
+                    endDate: $endDate,
+                    lossCut: $lossCut,
+                    profitFixed: $profitFixed
+                )
             }
         }
     }
@@ -193,15 +231,18 @@ struct TrailingView: View {
             
             Section(header: Text("銘柄入力")) {
                 HStack {
-                    TextField("銘柄コード (例: 7203)", text: $code)
-                        .focused($isFocused)
-                        .keyboardType(.numbersAndPunctuation)
-                    Picker("", selection: $market) {
-                        ForEach(Market.allCases){ market in
-                            Text(market.rawValue)
+                    VStack {
+                        Picker("", selection: $market) {
+                            ForEach(Market.allCases){ market in
+                                Text(market.rawValue)
+                            }
                         }
+                        .pickerStyle(.palette)
+                        
+                        TextField("銘柄コード (例: 7203)", text: $code)
+                            .focused($isFocused)
+                            .keyboardType(.numbersAndPunctuation)
                     }
-                    .frame(width: 80)
                     
                     Button (action: {
                         Task {
@@ -239,29 +280,6 @@ struct TrailingView: View {
                         ChipView(stockCodeTag: tag)
                     }
                 }
-               
-            }
-            
-            if !stockList.isEmpty {
-                Section(header: Text("結果")) {
-                    
-                    let winCount = stockList.filter { $0.winOrLose == .win }.count
-                    let loseCount:Double = Double(stockList.filter { $0.winOrLose == .lose }.count)
-                    let drawCount = stockList.filter { $0.winOrLose == .unsettled }.count
-                    
-                    Text("勝ち: \(winCount), 負け: \(Int(loseCount)), 未定: \(drawCount), 負け割合: \(String(format: "%.1f", loseCount/Double(stockList.count)))")
-                    List {
-                        ForEach(stockList) { stock in
-                            HStack {
-                                Text(stock.code)
-                                Image(stock.winOrLose.image)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 50)
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -270,9 +288,14 @@ struct TrailingView: View {
 extension TrailingView {
     func fetchStockValue(code: String, market: Market) async throws -> StockCodeTag {
         try await withCheckedThrowingContinuation { continuation in
+            // 詳細画面で再利用できるように古めの情報から保持しておく
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM/dd"
+            let start = dateFormatter.date(from: "2000/1/3")!
+            
             SwiftYFinance.chartDataBy(
                 identifier: code + market.symbol,
-                start: startDate,
+                start: start,
                 end: endDate
             ) { data, error in
                 if let error = error {
@@ -280,7 +303,7 @@ extension TrailingView {
                     return
                 }
                 
-                guard let data = data, let _ = data.first?.open else {
+                guard let data = data else {
                     continuation.resume(throwing: NSError(domain: "No open price", code: 0))
                     return
                 }
@@ -291,56 +314,56 @@ extension TrailingView {
     }
     
     // TODO: あとで消す
-    func fetchStockValue(code: String, market: Market = .tokyo) {
-        SwiftYFinance.chartDataBy(
-            identifier: code + market.symbol,
-            start: startDate,
-            end: endDate){
-                data, error in
-                
-                if error != nil {
-                    print("エラー")
-                    return
-                }
-                
-                // 初日の始まり値で購入する想定
-                guard let data = data, let startOpenPrice = data[0].open else {
-                    return
-                }
-                
-                var victoryOrDefeat: WinOrLose?
-                
-                data.forEach { value in
-                    guard let high = value.high, let low = value.low, victoryOrDefeat == nil else {
-                        return
-                    }
-                    
-                    let highPriceDifference = high - startOpenPrice
-                    let highPercent = highPriceDifference / startOpenPrice * 100
-                    // 高値が始まり値より高い + 高値が利確値よりも高い
-                    if high >= startOpenPrice && highPercent > Float(profitFixed) {
-                        victoryOrDefeat = .win
-                    }
-                    
-                    let lowPriceDifference = low - startOpenPrice
-                    let lowParcent = lowPriceDifference / startOpenPrice * 100
-                    // 安値が始まり値よりも低い + 安値が損切り値よりも低い
-                    if low <= startOpenPrice && lowParcent < Float(-lossCut) {
-                        victoryOrDefeat = .lose
-                    }
-                    
-                    print("code: \(code), high: \(high), low: \(low), highPercent: \(highPercent), lowParcent: \(lowParcent)")
-                }
-                
-                if victoryOrDefeat == nil {
-                    victoryOrDefeat = .unsettled
-                }
-                
-                stockList.append(.init(code: code, winOrLose: victoryOrDefeat!))
-                isLoading = false
-            }
-        
-    }
+//    func fetchStockValue(code: String, market: Market = .tokyo) {
+//        SwiftYFinance.chartDataBy(
+//            identifier: code + market.symbol,
+//            start: startDate,
+//            end: endDate){
+//                data, error in
+//                
+//                if error != nil {
+//                    print("エラー")
+//                    return
+//                }
+//                
+//                // 初日の始まり値で購入する想定
+//                guard let data = data, let startOpenPrice = data[0].open else {
+//                    return
+//                }
+//                
+//                var victoryOrDefeat: WinOrLose?
+//                
+//                data.forEach { value in
+//                    guard let high = value.high, let low = value.low, victoryOrDefeat == nil else {
+//                        return
+//                    }
+//                    
+//                    let highPriceDifference = high - startOpenPrice
+//                    let highPercent = highPriceDifference / startOpenPrice * 100
+//                    // 高値が始まり値より高い + 高値が利確値よりも高い
+//                    if high >= startOpenPrice && highPercent > Float(profitFixed) {
+//                        victoryOrDefeat = .win
+//                    }
+//                    
+//                    let lowPriceDifference = low - startOpenPrice
+//                    let lowParcent = lowPriceDifference / startOpenPrice * 100
+//                    // 安値が始まり値よりも低い + 安値が損切り値よりも低い
+//                    if low <= startOpenPrice && lowParcent < Float(-lossCut) {
+//                        victoryOrDefeat = .lose
+//                    }
+//                    
+//                    print("code: \(code), high: \(high), low: \(low), highPercent: \(highPercent), lowParcent: \(lowParcent)")
+//                }
+//                
+//                if victoryOrDefeat == nil {
+//                    victoryOrDefeat = .unsettled
+//                }
+//                
+//                stockList.append(.init(code: code, winOrLose: victoryOrDefeat!))
+//                isLoading = false
+//            }
+//        
+//    }
 }
 
 #Preview {
