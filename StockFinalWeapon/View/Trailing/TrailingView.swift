@@ -9,10 +9,10 @@ import SwiftUI
 import SwiftYFinance
 
 enum Market: String, CaseIterable, Identifiable {
-    case tokyo = "東京証券取引所"
-    case nagoya = "名古屋証券取引所"
-    case sapporo = "札幌証券取引所"
-    case hukuoka = "福岡証券取引所"
+    case tokyo = "東証"
+    case nagoya = "名証"
+    case sapporo = "札証"
+    case hukuoka = "福証"
     case none = "海外"
     
     var id: Self { self }
@@ -29,6 +29,21 @@ enum Market: String, CaseIterable, Identifiable {
             return ".F"
         case .none:
             return ""
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .tokyo:
+            return .red
+        case .nagoya:
+            return .yellow
+        case .sapporo:
+            return .blue
+        case .hukuoka:
+            return .green
+        case .none:
+            return .gray
         }
     }
 }
@@ -56,12 +71,34 @@ struct Stock: Identifiable {
     let winOrLose: WinOrLose
 }
 
+struct StockCodeTag: Identifiable, Hashable {
+    let id = UUID()
+    let code: String
+    let market: Market
+    let chartData: [StockChartData]
+    
+    func hash(into hasher: inout Hasher) {
+            hasher.combine(id)
+        hasher.combine(code)
+        hasher.combine(market)
+    }
+
+    static func == (lhs: StockCodeTag, rhs: StockCodeTag) -> Bool {
+        return lhs.id == rhs.id &&
+               lhs.code == rhs.code &&
+               lhs.market == rhs.market
+    }
+}
+
+
 struct TrailingView: View {
     // TODO: 入力できるようにする
     // TODO: 入力したものをTabで保存できるようにする
     @State private var codeList: [String] = [
         "2058", "8046", "6797", "5906", "3320", "5753", "8040", "6964"
     ]
+    @State private var stockCodeTags: [StockCodeTag] = []
+    
     @State private var selectedMarket: Market = .tokyo
     @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
     @State private var endDate: Date = Date()
@@ -71,6 +108,9 @@ struct TrailingView: View {
     @State private var lossCut: Int = 7
     @State private var profitFixed: Int = 7
     @State private var stockList: [Stock] = []
+    @FocusState private var isFocused: Bool
+    @State private var code: String = ""
+    @State private var market: Market = .tokyo
     
     @State private var isLoading: Bool = false
     
@@ -101,6 +141,7 @@ struct TrailingView: View {
                             Text("検証")
                         }
                     })
+                    .disabled(stockCodeTags.isEmpty)
                 }
             }
         }
@@ -133,7 +174,9 @@ struct TrailingView: View {
                     displayedComponents: [.date]
                 )
                 .environment(\.locale, Locale(identifier: "ja_JP"))
-                
+            }
+            
+            Section(header: Text("値幅")) {
                 Picker("損切り", selection: $lossCut) {
                     ForEach(1..<100){ value in
                         Text("- \(value)")
@@ -148,27 +191,74 @@ struct TrailingView: View {
                 }
             }
             
-            //            if let victoryOrDefeat = victoryOrDefeat {
-            //
-            //                Image(victoryOrDefeat.image)
-            //                Text(victoryOrDefeat.rawValue)
-            //            }
+            Section(header: Text("銘柄入力")) {
+                HStack {
+                    TextField("銘柄コード (例: 7203)", text: $code)
+                        .focused($isFocused)
+                        .keyboardType(.numbersAndPunctuation)
+                    Picker("", selection: $market) {
+                        ForEach(Market.allCases){ market in
+                            Text(market.rawValue)
+                        }
+                    }
+                    .frame(width: 80)
+                    
+                    Button (action: {
+                        Task {
+                            do {
+                                isFocused = false
+                                isLoading = true
+                                let result = try await fetchStockValue(code: code, market: market)
+                                print("取得成功: \(result)")
+                                stockCodeTags.append(result)
+                                
+                                // 初期化
+                                code = ""
+                                market = .tokyo
+                                isLoading = false
+                            } catch {
+                                isLoading = false
+                                // TODO: エラーがわかるようにtoastなどを出す？
+                                print("エラー: \(error)")
+                            }
+                        }
+                        
+                    }, label: {
+                        Label("追加", systemImage: "plus")
+                            .foregroundColor(.white)
+                    })
+                    .buttonStyle(.borderedProminent)
+                    .disabled(code.isEmpty)
+                }
+                
+                if stockCodeTags.isEmpty {
+                    Text("検証を行う銘柄を入力してください")
+                        .foregroundColor(.red)
+                } else {
+                    ChipsView(tags: stockCodeTags) { tag in
+                        ChipView(stockCodeTag: tag)
+                    }
+                }
+               
+            }
             
             if !stockList.isEmpty {
-                
-                let winCount = stockList.filter { $0.winOrLose == .win }.count
-                let loseCount:Double = Double(stockList.filter { $0.winOrLose == .lose }.count)
-                let drawCount = stockList.filter { $0.winOrLose == .unsettled }.count
-                
-                Text("勝ち: \(winCount), 負け: \(Int(loseCount)), 未定: \(drawCount), 負け割合: \(String(format: "%.1f", loseCount/Double(stockList.count)))")
-                List {
-                    ForEach(stockList) { stock in
-                        HStack {
-                            Text(stock.code)
-                            Image(stock.winOrLose.image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 50)
+                Section(header: Text("結果")) {
+                    
+                    let winCount = stockList.filter { $0.winOrLose == .win }.count
+                    let loseCount:Double = Double(stockList.filter { $0.winOrLose == .lose }.count)
+                    let drawCount = stockList.filter { $0.winOrLose == .unsettled }.count
+                    
+                    Text("勝ち: \(winCount), 負け: \(Int(loseCount)), 未定: \(drawCount), 負け割合: \(String(format: "%.1f", loseCount/Double(stockList.count)))")
+                    List {
+                        ForEach(stockList) { stock in
+                            HStack {
+                                Text(stock.code)
+                                Image(stock.winOrLose.image)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 50)
+                            }
                         }
                     }
                 }
@@ -178,9 +268,32 @@ struct TrailingView: View {
 }
 
 extension TrailingView {
-    func fetchStockValue(code: String) {
+    func fetchStockValue(code: String, market: Market) async throws -> StockCodeTag {
+        try await withCheckedThrowingContinuation { continuation in
+            SwiftYFinance.chartDataBy(
+                identifier: code + market.symbol,
+                start: startDate,
+                end: endDate
+            ) { data, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                guard let data = data, let _ = data.first?.open else {
+                    continuation.resume(throwing: NSError(domain: "No open price", code: 0))
+                    return
+                }
+                
+                continuation.resume(returning: StockCodeTag(code: code, market: market, chartData: data))
+            }
+        }
+    }
+    
+    // TODO: あとで消す
+    func fetchStockValue(code: String, market: Market = .tokyo) {
         SwiftYFinance.chartDataBy(
-            identifier: code + selectedMarket.symbol,
+            identifier: code + market.symbol,
             start: startDate,
             end: endDate){
                 data, error in
