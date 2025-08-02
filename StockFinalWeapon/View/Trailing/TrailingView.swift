@@ -89,8 +89,10 @@ struct TrailingView: View {
                     Button (action: {
                         isLoading = true
                         stockList = []
-                        codeList.forEach {
-                            fetchStockValue(code: $0)
+                        Task {
+                            codeList.forEach {
+                                fetchStockValue(code: $0)
+                            }
                         }
                         
                     }, label: {
