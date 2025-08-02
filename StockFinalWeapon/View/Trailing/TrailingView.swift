@@ -117,7 +117,7 @@ struct TrailingView: View {
     
     private func stableView() -> some View {
         Form {
-            Section(header: Text("検証日")) {
+            Section(header: Text("検証項目")) {
                 DatePicker(
                     "開始日",
                     selection: $startDate,
@@ -131,26 +131,17 @@ struct TrailingView: View {
                     displayedComponents: [.date]
                 )
                 .environment(\.locale, Locale(identifier: "ja_JP"))
-            }
-            
-            Section(header: Text("確定ライン")) {
-                HStack {
-                    Text("損切り:")
-                    Picker("損切り値", selection: $lossCut) {
-                        ForEach(1..<100){ value in
-                            Text("- \(value)")
-                                .tag(value)
-                        }
+                
+                Picker("損切り", selection: $lossCut) {
+                    ForEach(1..<100){ value in
+                        Text("- \(value)")
+                            .tag(value)
                     }
                 }
-                
-                HStack {
-                    Text("利確:")
-                    Picker("損切り値", selection: $profitFixed) {
-                        ForEach(1..<100){ value in
-                            Text("\(value)")
-                                .tag(value)
-                        }
+                Picker("利確", selection: $profitFixed) {
+                    ForEach(1..<100){ value in
+                        Text("\(value)")
+                            .tag(value)
                     }
                 }
             }
