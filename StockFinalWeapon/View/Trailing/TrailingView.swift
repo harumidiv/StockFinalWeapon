@@ -269,7 +269,7 @@ struct TrailingView: View {
                             .foregroundColor(.white)
                     })
                     .buttonStyle(.borderedProminent)
-                    .disabled(code.isEmpty)
+                    .disabled(code.isEmpty || isLoading)
                 }
                 
                 if stockCodeTags.isEmpty {
