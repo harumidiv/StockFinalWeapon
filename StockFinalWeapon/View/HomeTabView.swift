@@ -50,7 +50,7 @@ struct HomeTabView: View {
                             Label(AppTab.trailing.title, systemImage: AppTab.trailing.icon)
                         }
                 case .ipo:
-                    IPOListView()
+                    IPOFluctuationRateScreen()
                         .tabItem {
                             Label(AppTab.ipo.title, systemImage: AppTab.ipo.icon)
                         }

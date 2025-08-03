@@ -1,5 +1,5 @@
 //
-//  ScreeningView.swift
+//  ScreeningScreen.swift
 //  StockChart
 //
 //  Created by 佐川 晴海 on 2024/08/07.
@@ -20,7 +20,7 @@ struct ScrapingIPOData: Identifiable {
     let link: String
 }
 
-struct ScreeningView: View {
+struct ScreeningScreen: View {
     let priceRizeParcentage: Float
     let ipoData: [StockIPOData]
     
@@ -155,7 +155,7 @@ extension URL {
 }
 
 //YahooFinanceからのデータ取得処理
-extension ScreeningView {
+extension ScreeningScreen {
     
     /// IPO銘柄に対して指定以上の上昇をしている銘柄をスクリーニングする
     /// - Parameters:
@@ -313,6 +313,6 @@ extension ScreeningView {
 }
 
 #Preview {
-    ScreeningView(priceRizeParcentage: 0, ipoData: Constant.ipo2021)
+    ScreeningScreen(priceRizeParcentage: 0, ipoData: Constant.ipo2021)
 }
 

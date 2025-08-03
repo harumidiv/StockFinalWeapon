@@ -1,5 +1,5 @@
 //
-//  IPODetailView.swift
+//  IPODetailScreen.swift
 //  StockChart
 //
 //  Created by 佐川 晴海 on 2025/07/16.
@@ -9,7 +9,7 @@ import SwiftUI
 import SwiftSoup
 import SwiftYFinance
 
-struct IPODetailView: View {
+struct IPODetailScreen: View {
     let priceRizeParcentage: Float
     let ipoInfo: IPOInfo
     let comparison: ComparisonType
@@ -101,7 +101,7 @@ struct IPODetailView: View {
 }
 
 //YahooFinanceからのデータ取得処理
-extension IPODetailView {
+extension IPODetailScreen {
     
     /// IPO銘柄に対して指定以上の上昇をしている銘柄をスクリーニングする
     /// - Parameters:
@@ -218,5 +218,5 @@ extension IPODetailView {
 }
 
 #Preview {
-    IPODetailView(priceRizeParcentage: 0.0, ipoInfo: IPOInfo(year: "2024", stockCodes: ["2432", "248A"]), comparison: .greaterThanOrEqual)
+    IPODetailScreen(priceRizeParcentage: 0.0, ipoInfo: IPOInfo(year: "2024", stockCodes: ["2432", "248A"]), comparison: .greaterThanOrEqual)
 }
