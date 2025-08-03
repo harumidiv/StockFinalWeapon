@@ -1,5 +1,5 @@
 //
-//  TrailingResultView.swift
+//  TrailingResultScreen.swift
 //  StockFinalWeapon
 //
 //  Created by 佐川 晴海 on 2025/08/02.
@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-struct TrailingResultView: View {
+struct TrailingResultScreen: View {
     @Binding var stockList: [StockCodeTag]
     @Binding var startDate: Date
     @Binding var endDate: Date
@@ -40,5 +40,5 @@ struct TrailingResultView: View {
 }
 
 #Preview {
-    TrailingResultView(stockList: .constant([]), startDate: .constant(Date()), endDate: .constant(Date()), lossCut: .constant(-7), profitFixed: .constant(7))
+    TrailingResultScreen(stockList: .constant([]), startDate: .constant(Date()), endDate: .constant(Date()), lossCut: .constant(-7), profitFixed: .constant(7))
 }

@@ -45,7 +45,7 @@ struct HomeTabView: View {
                         }
                         .tag(AppTab.yuutaiSakimawari)
                 case .trailing:
-                    TrailingView()
+                    TrailingConditionsScreen()
                         .tabItem {
                             Label(AppTab.trailing.title, systemImage: AppTab.trailing.icon)
                         }

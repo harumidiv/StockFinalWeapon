@@ -14,7 +14,6 @@ struct SelectedMonth: Identifiable, Equatable, Hashable {
 }
 
 struct YuutaiMonthSelectScreen: View {
-    
     private let months: [SelectedMonth] = [
         .init(ja: "1月", en: "january"),
         .init(ja: "2月", en: "february"),
@@ -74,7 +73,7 @@ struct YuutaiMonthSelectScreen: View {
             }
             .navigationTitle("優待先周り")
             .navigationDestination(for: SelectedMonth.self) { month in
-                YuutaiMonthDetailView(
+                YuutaiMonthSelectListScreen(
                     purchaseDate: $purchaseDate,
                     saleDate: $saleDate,
                     month: month
