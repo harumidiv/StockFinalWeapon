@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ChipView: View {
     let stockCodeTag: StockCodeTag
+    
     var body: some View {
         HStack(spacing: 10) {
             if let market = stockCodeTag.market.rawValue.first {
@@ -20,7 +21,6 @@ struct ChipView: View {
                 .font(.callout)
                 .foregroundColor(.white)
                 .foregroundStyle(Color.primary)
-            
             
         }
         .padding(.horizontal, 12)
