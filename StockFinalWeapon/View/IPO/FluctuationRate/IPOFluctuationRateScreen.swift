@@ -76,7 +76,6 @@ struct IPOFluctuationRateScreen: View {
                     if year > 2017 {
                         codes = try extractAllStockCodes(from: html)
                     } else if year == 2017 || year == 2016 {
-                        print("😺: \(year)")
                         codes = try extractAllStockCodes2017AndBefore(from: html)
                     } else {
                         codes = try extractAllStockCodes2015AndBefore(from: html)

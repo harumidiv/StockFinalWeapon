@@ -38,6 +38,63 @@ struct YuutaiUtil {
         return String(format: "%.1f%%", percent)
     }
     
+    /// 対象銘柄の株価データを引っ張る
+    /// - Parameter code: 銘柄コード
+    /// - Returns: 株価データの配列
+    static func fetchStockData(code: String) async -> Result<[StockChartData], Error> {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM/dd"
+        // 存在しないデータはスキップされるのでかなり昔から取得
+        let start = dateFormatter.date(from: "1980/1/3")!
+        
+        do {
+            let data = try await SwiftYFinanceHelper.fetchChartData(
+                identifier: "\(code).T",
+                start: start,
+                end: Date()
+            )
+            return .success(data)
+        } catch {
+            return .failure(error)
+        }
+    }
+    
+    /// 値上がりを検証する
+    /// - Parameters:
+    ///   - stockChartData: 株価データ
+    ///   - purchaseDay: 購入日
+    ///   - saleDay: 売却日
+    /// - Returns: 結果のリスト
+    static func fetchStockPrice(
+        stockChartData: [StockChartData],
+        purchaseDay: Date,
+        saleDay: Date
+    ) -> [StockChartPairData] {
+        let purchaseDayList = extractPurchaseDataNearTargetDate(from: stockChartData, targetMonthDay: purchaseDay)
+        let saleDayList = extractPurchaseDataNearTargetDate(from: stockChartData, targetMonthDay: saleDay)
+
+        let calendar = Calendar.current
+        var result: [StockChartPairData] = []
+
+        for purchase in purchaseDayList {
+            guard let purchaseDate = purchase.date else { continue }
+            let year = calendar.component(.year, from: purchaseDate)
+
+            let sameYearSale = saleDayList.first {
+                guard let saleDate = $0.date else { return false }
+                return calendar.component(.year, from: saleDate) == year
+            }
+
+            if let sameYearSaleDate = sameYearSale?.date {
+                let maxAndmin = findHighLowAdjClose(in: stockChartData, from: purchaseDate, to: sameYearSaleDate)
+                result.append(StockChartPairData(purchase: purchase, sale: sameYearSale, highestPrice: maxAndmin.max, lowestPrice: maxAndmin.min))
+            } else {
+                result.append(StockChartPairData(purchase: purchase, sale: sameYearSale))
+            }
+        }
+        return result
+    }
+    
     /// 値上がりを検証する
     /// - Parameters:
     ///   - code: 銘柄コード

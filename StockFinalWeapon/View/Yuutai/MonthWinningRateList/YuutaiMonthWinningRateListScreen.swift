@@ -7,43 +7,61 @@
 
 import SwiftUI
 import SwiftSoup
+import SwiftYFinance
 
-struct YuutaiMonthWinningRateListScreen: View {
-    struct TanosiiYuutaiInfo {
-        let name: String
-        let code: String
-        let creditType: String?
-    }
+struct TanosiiYuutaiInfo {
+    let name: String
+    let code: String
+    let creditType: String?
+}
 
-    struct StockInfo: Identifiable, Hashable {
-        let id = UUID()
-        let name: String
-        let code: String
-        let creditType: String?
-        let winningRate: Float
-        let trialCount: Int
-
-        init(yuutaiInfo: TanosiiYuutaiInfo, winningRate: Float, trialCount: Int) {
-            self.name = yuutaiInfo.name
-            self.code = yuutaiInfo.code
-            self.creditType = yuutaiInfo.creditType
-            self.winningRate = winningRate
-            self.trialCount = trialCount
-        }
+struct StockWinningRate: Identifiable, Hashable {
+    let id = UUID()
+    let name: String
+    let code: String
+    let creditType: String?
+    let stockChartData: [StockChartData]
+    
+    let winningRate: Float
+    let totalCount: Int
+    
+    init(yuutaiInfo: TanosiiYuutaiInfo, stockChartData: [StockChartData], winningRate: Float, totalCount: Int) {
+        self.name = yuutaiInfo.name
+        self.code = yuutaiInfo.code
+        self.creditType = yuutaiInfo.creditType
+        self.stockChartData = stockChartData
+        self.winningRate = winningRate
+        self.totalCount = totalCount
     }
     
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(code)
+        hasher.combine(creditType)
+    }
+    
+    static func == (lhs: StockWinningRate, rhs: StockWinningRate) -> Bool {
+        return lhs.id == rhs.id &&
+        lhs.name == rhs.name &&
+        lhs.code == rhs.code &&
+        lhs.creditType == rhs.creditType
+    }
+}
+
+struct YuutaiMonthWinningRateListScreen: View {
     // 特定月の銘柄リスト
     @State private var tanosiiYuutaiInfo: [TanosiiYuutaiInfo] = []
-
-    @State private var selectedStock: StockInfo? = nil
-    @State private var stockDisplayInfo: [StockInfo] = []
+    
+    @State private var selectedStock: StockWinningRate? = nil
+    @State private var stockDisplayWinningRate: [StockWinningRate] = []
     @State private var isLoading: Bool = true
-
+    
     private let baseURL = "https://www.kabuyutai.com/yutai/"
     @Binding var purchaseDate: Date
     @Binding var saleDate: Date
     let month: SelectedMonth
-
+    
     var verificationRange: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "M/d"
@@ -51,7 +69,7 @@ struct YuutaiMonthWinningRateListScreen: View {
         let end = formatter.string(from: saleDate)
         return "\(month.ja)権利: \(start) 〜 \(end)"
     }
-
+    
     var body: some View {
         VStack {
             HStack {
@@ -76,23 +94,23 @@ struct YuutaiMonthWinningRateListScreen: View {
                 ProgressView()
                 Spacer()
             } else {
-                List(stockDisplayInfo) { info in
+                List(stockDisplayWinningRate) { info in
                     NavigationLink(value: info) {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(info.name).lineLimit(1)
                                 Text(info.code)
                             }
-
+                            
                             Spacer()
-
+                            
                             VStack(alignment: .leading) {
                                 if let creditType = info.creditType {
                                     Text(creditType)
                                 }
-                                Text("検証回数: \(info.trialCount)回")
+                                Text("検証回数: \(info.totalCount)回")
                             }
-
+                            
                             Text(String(format: "%.1f%%", info.winningRate))
                                 .foregroundColor(info.winningRate >= 50 ? .red : .blue)
                         }
@@ -103,22 +121,28 @@ struct YuutaiMonthWinningRateListScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button (action: {
-                    // TODO キャッシュしたアイテムを通信なしでリロードできるようにする
-                    Task {
-                        isLoading = true
-                        let infoList = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
-                        stockDisplayInfo = infoList.sorted {
-                            $0.winningRate > $1.winningRate
-                        }
-                        isLoading = false
+                    // TODO: 日付周りの計算が重くてメインスレッドが止まるので非同期にしたい
+                    let newData = stockDisplayWinningRate.compactMap {
+                        let winningRateAndTrialCount = calculateWinnigRate(chartData: $0.stockChartData)
+                        return StockWinningRate(
+                            yuutaiInfo: .init(name: $0.name, code: $0.code, creditType: $0.creditType),
+                            stockChartData: $0.stockChartData,
+                            winningRate: winningRateAndTrialCount.0,
+                            totalCount: winningRateAndTrialCount.1
+                        )
                     }
+                    stockDisplayWinningRate = newData.sorted {
+                        $0.winningRate > $1.winningRate
+                    }
+                    
+                    
                 }, label: {
                     Image(systemName: "arrow.trianglehead.2.clockwise")
                 })
                 .disabled(isLoading)
             }
         }
-        .navigationDestination(for: StockInfo.self) { info in
+        .navigationDestination(for: StockWinningRate.self) { info in
             YuutaiAnticipationView(
                 code: .constant(info.code),
                 purchaseDate: $purchaseDate,
@@ -128,33 +152,36 @@ struct YuutaiMonthWinningRateListScreen: View {
         .navigationTitle(verificationRange)
         .task {
             // 個別の検証から戻った時に通信が走ってしまうので弾く
-            if stockDisplayInfo.isEmpty {
+            if stockDisplayWinningRate.isEmpty {
                 isLoading = true
                 tanosiiYuutaiInfo = await fetchStockInfo()
                 
                 let infoList = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
-                stockDisplayInfo = infoList.sorted {
+                stockDisplayWinningRate = infoList.sorted {
                     $0.winningRate > $1.winningRate
                 }
                 isLoading = false
             }
         }
     }
-    
-    func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo]) async -> [StockInfo] {
-        await withTaskGroup(of: StockInfo?.self, returning: [StockInfo].self) { group in
+}
+
+// 銘柄の購入日から売却日までの勝率を取得
+private extension YuutaiMonthWinningRateListScreen {
+    func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
+        await withTaskGroup(of: StockWinningRate?.self, returning: [StockWinningRate].self) { group in
             let start = Date()
             for item in stockInfo {
                 group.addTask {
-                    if let (winRate, trialCount) = await fetchWinningRate(for: item.code) {
-                        return await StockInfo(yuutaiInfo: item, winningRate: winRate, trialCount: trialCount)
+                    if let winningRate = await fetchWinningRateAndTrialCount(for: item.code) {
+                        return await StockWinningRate(yuutaiInfo: item, stockChartData: winningRate.0, winningRate: winningRate.1, totalCount: winningRate.2)
                     } else {
                         return nil
                     }
                 }
             }
-
-            var results = [StockInfo]()
+            
+            var results = [StockWinningRate]()
             for await maybeInfo in group {
                 if let info = maybeInfo {
                     results.append(info)
@@ -168,30 +195,31 @@ struct YuutaiMonthWinningRateListScreen: View {
         }
     }
     
-}
-
-// 銘柄の購入日から売却日までの勝率を取得
-private extension YuutaiMonthWinningRateListScreen {
-    func fetchWinningRate(for code: String) async -> (Float, Int)? {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy/MM/dd"
-        let start = dateFormatter.date(from: "2015/1/3")! // TODO: 外から入れられた方が良いかも？
-
-        let result = await YuutaiUtil.fetchStockPrice(
-            code: code,
-            startDate: start,
-            endDate: Date(),
-            purchaseDay: purchaseDate,
-            saleDay: saleDate
-        )
+    func fetchWinningRateAndTrialCount(for code: String) async -> ([StockChartData], Float, Int)? {
+        let result = await YuutaiUtil.fetchStockData(code: code)
         switch result {
-        case .success(let pairs):
+        case .success(let stockChartData):
+            let winningRateAndTrialCount = calculateWinnigRate(chartData: stockChartData)
+            return (stockChartData, winningRateAndTrialCount.0, winningRateAndTrialCount.1)
             
-            return (YuutaiUtil.riseRateString(for: pairs), YuutaiUtil.trialCount(for: pairs))
-        case .failure(let error):
-            print("Error fetching for \(code): \(error)")
+        case .failure(_):
             return nil
         }
+    }
+    
+    func calculateWinnigRate(chartData: [StockChartData]) -> (Float, Int) {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM/dd"
+        let start = dateFormatter.date(from: "2015/1/3")! // TODO: 外から入れられた方が良いかも！
+        let verificationPeriod = chartData.filter {
+            if let date = $0.date {
+                return date > start
+            }
+            return false
+        }
+        
+        let pairs = YuutaiUtil.fetchStockPrice(stockChartData: verificationPeriod, purchaseDay: purchaseDate, saleDay: saleDate)
+        return (YuutaiUtil.riseRateString(for: pairs), YuutaiUtil.trialCount(for: pairs))
     }
 }
 
@@ -200,7 +228,6 @@ private extension YuutaiMonthWinningRateListScreen {
     func fetchStockInfo() async -> [TanosiiYuutaiInfo] {
         var page = 1
         var stockInfo: [TanosiiYuutaiInfo] = []
-        
         
         while true {
             let urlString: String
@@ -253,7 +280,7 @@ private extension YuutaiMonthWinningRateListScreen {
                 
                 let code: String
                 let range = NSRange(fullText.startIndex..., in: fullText)
-                
+
                 if let match = regex.firstMatch(in: fullText, range: range),
                    let codeRange = Range(match.range(at: 1), in: fullText) {
                     code = String(fullText[codeRange])
@@ -282,3 +309,4 @@ private extension YuutaiMonthWinningRateListScreen {
 #Preview {
     YuutaiMonthWinningRateListScreen(purchaseDate: .constant(.now), saleDate: .constant(.now), month: .init(ja: "1月", en: "january"))
 }
+
