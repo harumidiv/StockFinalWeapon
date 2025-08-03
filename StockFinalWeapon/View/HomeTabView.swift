@@ -39,7 +39,7 @@ struct HomeTabView: View {
             ForEach(AppTab.allCases, id: \.self) { tab in
                 switch tab {
                 case .yuutaiSakimawari:
-                    YuutaiMonthView()
+                    YuutaiMonthSelectScreen()
                         .tabItem {
                             Label(AppTab.yuutaiSakimawari.title, systemImage: AppTab.yuutaiSakimawari.icon)
                         }

@@ -1,5 +1,5 @@
 //
-//  YuutaiMonthView.swift
+//  YuutaiMonthSelectScreen.swift
 //  StockChart
 //
 //  Created by 佐川 晴海 on 2025/07/13.
@@ -13,7 +13,7 @@ struct SelectedMonth: Identifiable, Equatable, Hashable {
     let en: String
 }
 
-struct YuutaiMonthView: View {
+struct YuutaiMonthSelectScreen: View {
     
     private let months: [SelectedMonth] = [
         .init(ja: "1月", en: "january"),
@@ -85,6 +85,6 @@ struct YuutaiMonthView: View {
 }
 
 #Preview {
-    YuutaiMonthView()
+    YuutaiMonthSelectScreen()
 }
 

@@ -1,5 +1,5 @@
 //
-//  YuutaiMonthDetailView.swift
+//  YuutaiMonthSelectListScreen.swift
 //  StockChart
 //
 //  Created by 佐川 晴海 on 2025/07/13.
@@ -8,7 +8,7 @@
 import SwiftUI
 import SwiftSoup
 
-struct YuutaiMonthDetailView: View {
+struct YuutaiMonthSelectListScreen: View {
     struct TanosiiYuutaiInfo {
         let name: String
         let code: String
@@ -141,7 +141,7 @@ struct YuutaiMonthDetailView: View {
 }
 
 // 銘柄の購入日から売却日までの勝率を取得
-private extension YuutaiMonthDetailView {
+private extension YuutaiMonthSelectListScreen {
     func fetchWinningRate(for code: String) async -> (Float, Int)? {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy/MM/dd"
@@ -166,7 +166,7 @@ private extension YuutaiMonthDetailView {
 }
 
 // 楽しい配当優待生活から指定月の銘柄コード一覧を取得
-private extension YuutaiMonthDetailView {
+private extension YuutaiMonthSelectListScreen {
     func fetchStockInfo() async -> [TanosiiYuutaiInfo] {
         var page = 1
         var stockInfo: [TanosiiYuutaiInfo] = []
@@ -250,5 +250,5 @@ private extension YuutaiMonthDetailView {
 
 
 #Preview {
-    YuutaiMonthDetailView(purchaseDate: .constant(.now), saleDate: .constant(.now), month: .init(ja: "1月", en: "january"))
+    YuutaiMonthSelectListScreen(purchaseDate: .constant(.now), saleDate: .constant(.now), month: .init(ja: "1月", en: "january"))
 }
