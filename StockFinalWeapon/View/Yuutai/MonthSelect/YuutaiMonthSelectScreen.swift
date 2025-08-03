@@ -73,7 +73,7 @@ struct YuutaiMonthSelectScreen: View {
             }
             .navigationTitle("優待先周り")
             .navigationDestination(for: SelectedMonth.self) { month in
-                YuutaiMonthSelectListScreen(
+                YuutaiMonthWinningRateListScreen(
                     purchaseDate: $purchaseDate,
                     saleDate: $saleDate,
                     month: month

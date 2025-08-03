@@ -1,5 +1,5 @@
 //
-//  YuutaiMonthSelectListScreen.swift
+//  YuutaiMonthWinningRateListScreen.swift
 //  StockChart
 //
 //  Created by 佐川 晴海 on 2025/07/13.
@@ -8,7 +8,7 @@
 import SwiftUI
 import SwiftSoup
 
-struct YuutaiMonthSelectListScreen: View {
+struct YuutaiMonthWinningRateListScreen: View {
     struct TanosiiYuutaiInfo {
         let name: String
         let code: String
@@ -31,11 +31,13 @@ struct YuutaiMonthSelectListScreen: View {
             self.trialCount = trialCount
         }
     }
+    
+    // 特定月の銘柄リスト
+    @State private var tanosiiYuutaiInfo: [TanosiiYuutaiInfo] = []
 
     @State private var selectedStock: StockInfo? = nil
     @State private var stockDisplayInfo: [StockInfo] = []
     @State private var isLoading: Bool = true
-    @State private var stockCount: Int = 0
 
     private let baseURL = "https://www.kabuyutai.com/yutai/"
     @Binding var purchaseDate: Date
@@ -53,11 +55,22 @@ struct YuutaiMonthSelectListScreen: View {
     var body: some View {
         VStack {
             HStack {
-                let count = stockCount == 0 ? "--" : stockCount.description
+                let count = tanosiiYuutaiInfo.count == 0 ? "--" : tanosiiYuutaiInfo.count.description
                 Text("\(month.ja)優待  対象銘柄数: \(count)")
                 Spacer()
             }
             .padding(.horizontal)
+            
+            VStack {
+                DatePicker("購入日", selection: $purchaseDate, displayedComponents: .date)
+                    .environment(\.locale, Locale(identifier: "ja_JP"))
+                    .disabled(isLoading)
+                DatePicker("売却日", selection: $saleDate, displayedComponents: .date)
+                    .environment(\.locale, Locale(identifier: "ja_JP"))
+                    .disabled(isLoading)
+            }
+            .padding(.horizontal)
+            
             if isLoading {
                 Spacer()
                 ProgressView()
@@ -87,6 +100,24 @@ struct YuutaiMonthSelectListScreen: View {
                 }
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button (action: {
+                    // TODO キャッシュしたアイテムを通信なしでリロードできるようにする
+                    Task {
+                        isLoading = true
+                        let infoList = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
+                        stockDisplayInfo = infoList.sorted {
+                            $0.winningRate > $1.winningRate
+                        }
+                        isLoading = false
+                    }
+                }, label: {
+                    Image(systemName: "arrow.trianglehead.2.clockwise")
+                })
+                .disabled(isLoading)
+            }
+        }
         .navigationDestination(for: StockInfo.self) { info in
             YuutaiAnticipationView(
                 code: .constant(info.code),
@@ -99,10 +130,9 @@ struct YuutaiMonthSelectListScreen: View {
             // 個別の検証から戻った時に通信が走ってしまうので弾く
             if stockDisplayInfo.isEmpty {
                 isLoading = true
-                let stockInfo = await fetchStockInfo()
-                stockCount = stockInfo.count
+                tanosiiYuutaiInfo = await fetchStockInfo()
                 
-                let infoList = await fetchAllStockInfo(stockInfo: stockInfo)
+                let infoList = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
                 stockDisplayInfo = infoList.sorted {
                     $0.winningRate > $1.winningRate
                 }
@@ -117,7 +147,7 @@ struct YuutaiMonthSelectListScreen: View {
             for item in stockInfo {
                 group.addTask {
                     if let (winRate, trialCount) = await fetchWinningRate(for: item.code) {
-                        return StockInfo(yuutaiInfo: item, winningRate: winRate, trialCount: trialCount)
+                        return await StockInfo(yuutaiInfo: item, winningRate: winRate, trialCount: trialCount)
                     } else {
                         return nil
                     }
@@ -141,7 +171,7 @@ struct YuutaiMonthSelectListScreen: View {
 }
 
 // 銘柄の購入日から売却日までの勝率を取得
-private extension YuutaiMonthSelectListScreen {
+private extension YuutaiMonthWinningRateListScreen {
     func fetchWinningRate(for code: String) async -> (Float, Int)? {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy/MM/dd"
@@ -166,7 +196,7 @@ private extension YuutaiMonthSelectListScreen {
 }
 
 // 楽しい配当優待生活から指定月の銘柄コード一覧を取得
-private extension YuutaiMonthSelectListScreen {
+private extension YuutaiMonthWinningRateListScreen {
     func fetchStockInfo() async -> [TanosiiYuutaiInfo] {
         var page = 1
         var stockInfo: [TanosiiYuutaiInfo] = []
@@ -250,5 +280,5 @@ private extension YuutaiMonthSelectListScreen {
 
 
 #Preview {
-    YuutaiMonthSelectListScreen(purchaseDate: .constant(.now), saleDate: .constant(.now), month: .init(ja: "1月", en: "january"))
+    YuutaiMonthWinningRateListScreen(purchaseDate: .constant(.now), saleDate: .constant(.now), month: .init(ja: "1月", en: "january"))
 }
