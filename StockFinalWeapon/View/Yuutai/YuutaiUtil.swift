@@ -69,9 +69,9 @@ struct YuutaiUtil {
         stockChartData: [StockChartData],
         purchaseDay: Date,
         saleDay: Date
-    ) -> [StockChartPairData] {
-        let purchaseDayList = extractPurchaseDataNearTargetDate(from: stockChartData, targetMonthDay: purchaseDay)
-        let saleDayList = extractPurchaseDataNearTargetDate(from: stockChartData, targetMonthDay: saleDay)
+    ) async -> [StockChartPairData] {
+        let purchaseDayList = await extractPurchaseDataNearTargetDate(from: stockChartData, targetMonthDay: purchaseDay)
+        let saleDayList = await extractPurchaseDataNearTargetDate(from: stockChartData, targetMonthDay: saleDay)
 
         let calendar = Calendar.current
         var result: [StockChartPairData] = []
@@ -117,8 +117,8 @@ struct YuutaiUtil {
                 end: endDate
             )
 
-            let purchaseDayList = extractPurchaseDataNearTargetDate(from: data, targetMonthDay: purchaseDay)
-            let saleDayList = extractPurchaseDataNearTargetDate(from: data, targetMonthDay: saleDay)
+            let purchaseDayList = await extractPurchaseDataNearTargetDate(from: data, targetMonthDay: purchaseDay)
+            let saleDayList = await extractPurchaseDataNearTargetDate(from: data, targetMonthDay: saleDay)
 
             let calendar = Calendar.current
             var result: [StockChartPairData] = []
@@ -170,41 +170,51 @@ struct YuutaiUtil {
         from data: [StockChartData],
         targetMonthDay: Date,
         searchDayOffsets: [Int] = [-1, 1, -2, 2, -3, 3]
-    ) -> [StockChartData] {
-        let calendar = Calendar.current
-        var result: [StockChartData] = []
-        let groupedByYear = Dictionary(grouping: data.compactMap { $0.date }, by: {
-            calendar.component(.year, from: $0)
-        })
-        for (year, _) in groupedByYear {
-            guard let baseDate = calendar.date(from: DateComponents(
-                year: year,
-                month: calendar.component(.month, from: targetMonthDay),
-                day: calendar.component(.day, from: targetMonthDay)
-            )) else {
-                continue
-            }
-            if let exact = data.first(where: {
-                guard let d = $0.date else { return false }
-                return calendar.isDate(d, inSameDayAs: baseDate)
-            }) {
-                result.append(exact)
-                continue
-            }
-            for offset in searchDayOffsets {
-                if let altDate = calendar.date(byAdding: .day, value: offset, to: baseDate),
-                   let near = data.first(where: {
-                       guard let d = $0.date else { return false }
-                       return calendar.isDate(d, inSameDayAs: altDate)
-                   }) {
-                    result.append(near)
-                    break
+    ) async -> [StockChartData] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let calendar = Calendar.current
+                var result: [StockChartData] = []
+                let groupedByYear = Dictionary(grouping: data.compactMap { $0.date }, by: {
+                    calendar.component(.year, from: $0)
+                })
+
+                for (year, _) in groupedByYear {
+                    guard let baseDate = calendar.date(from: DateComponents(
+                        year: year,
+                        month: calendar.component(.month, from: targetMonthDay),
+                        day: calendar.component(.day, from: targetMonthDay)
+                    )) else {
+                        continue
+                    }
+
+                    if let exact = data.first(where: {
+                        guard let d = $0.date else { return false }
+                        return calendar.isDate(d, inSameDayAs: baseDate)
+                    }) {
+                        result.append(exact)
+                        continue
+                    }
+
+                    for offset in searchDayOffsets {
+                        if let altDate = calendar.date(byAdding: .day, value: offset, to: baseDate),
+                           let near = data.first(where: {
+                               guard let d = $0.date else { return false }
+                               return calendar.isDate(d, inSameDayAs: altDate)
+                           }) {
+                            result.append(near)
+                            break
+                        }
+                    }
                 }
+
+                let sortedResult = result.sorted {
+                    guard let d1 = $0.date, let d2 = $1.date else { return false }
+                    return d1 < d2
+                }
+
+                continuation.resume(returning: sortedResult)
             }
-        }
-        return result.sorted {
-            guard let d1 = $0.date, let d2 = $1.date else { return false }
-            return d1 < d2
         }
     }
 }

@@ -121,20 +121,25 @@ struct YuutaiMonthWinningRateListScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button (action: {
-                    // TODO: 日付周りの計算が重くてメインスレッドが止まるので非同期にしたい
-                    let newData = stockDisplayWinningRate.compactMap {
-                        let winningRateAndTrialCount = calculateWinnigRate(chartData: $0.stockChartData)
-                        return StockWinningRate(
-                            yuutaiInfo: .init(name: $0.name, code: $0.code, creditType: $0.creditType),
-                            stockChartData: $0.stockChartData,
-                            winningRate: winningRateAndTrialCount.0,
-                            totalCount: winningRateAndTrialCount.1
-                        )
+                    Task {
+                        isLoading = true
+                        var newData: [StockWinningRate] = []
+
+                        for item in stockDisplayWinningRate {
+                            let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
+                            let result = StockWinningRate(
+                                yuutaiInfo: .init(name: item.name, code: item.code, creditType: item.creditType),
+                                stockChartData: item.stockChartData,
+                                winningRate: winningRate,
+                                totalCount: trialCount
+                            )
+                            newData.append(result)
+                        }
+                        stockDisplayWinningRate = newData.sorted {
+                            $0.winningRate > $1.winningRate
+                        }
+                        isLoading = false
                     }
-                    stockDisplayWinningRate = newData.sorted {
-                        $0.winningRate > $1.winningRate
-                    }
-                    
                     
                 }, label: {
                     Image(systemName: "arrow.trianglehead.2.clockwise")
@@ -199,7 +204,7 @@ private extension YuutaiMonthWinningRateListScreen {
         let result = await YuutaiUtil.fetchStockData(code: code)
         switch result {
         case .success(let stockChartData):
-            let winningRateAndTrialCount = calculateWinnigRate(chartData: stockChartData)
+            let winningRateAndTrialCount = await calculateWinnigRate(chartData: stockChartData)
             return (stockChartData, winningRateAndTrialCount.0, winningRateAndTrialCount.1)
             
         case .failure(_):
@@ -207,7 +212,7 @@ private extension YuutaiMonthWinningRateListScreen {
         }
     }
     
-    func calculateWinnigRate(chartData: [StockChartData]) -> (Float, Int) {
+    func calculateWinnigRate(chartData: [StockChartData]) async -> (Float, Int) {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy/MM/dd"
         let start = dateFormatter.date(from: "2015/1/3")! // TODO: 外から入れられた方が良いかも！
@@ -218,7 +223,7 @@ private extension YuutaiMonthWinningRateListScreen {
             return false
         }
         
-        let pairs = YuutaiUtil.fetchStockPrice(stockChartData: verificationPeriod, purchaseDay: purchaseDate, saleDay: saleDate)
+        let pairs = await YuutaiUtil.fetchStockPrice(stockChartData: verificationPeriod, purchaseDay: purchaseDate, saleDay: saleDate)
         return (YuutaiUtil.riseRateString(for: pairs), YuutaiUtil.trialCount(for: pairs))
     }
 }
