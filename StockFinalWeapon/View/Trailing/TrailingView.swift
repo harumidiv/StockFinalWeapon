@@ -68,12 +68,6 @@ enum WinOrLose: String {
     }
 }
 
-struct Stock: Identifiable {
-    let id = UUID()
-    let code: String
-    let winOrLose: WinOrLose
-}
-
 struct StockCodeTag: Identifiable, Hashable {
     let id = UUID()
     let code: String
@@ -149,6 +143,9 @@ struct TrailingView: View {
     @State private var isPresenting = false
     
     private let priceParcent:[Int] = ([Int])(-99...99)
+    
+    @State private var showAlert: Bool = false
+    @State private var deleteItem: StockCodeTag?
     
     var body: some View {
         NavigationStack {
@@ -269,7 +266,7 @@ struct TrailingView: View {
                             .foregroundColor(.white)
                     })
                     .buttonStyle(.borderedProminent)
-                    .disabled(code.isEmpty)
+                    .disabled(code.isEmpty || isLoading)
                 }
                 
                 if stockCodeTags.isEmpty {
@@ -278,6 +275,21 @@ struct TrailingView: View {
                 } else {
                     ChipsView(tags: stockCodeTags) { tag in
                         ChipView(stockCodeTag: tag)
+                    } didSelect: {selection in
+                        showAlert = true
+                        deleteItem = selection
+                    }
+                    .alert("削除しますか？", isPresented: $showAlert) {
+                        Button("はい", role: .destructive) {
+                            if let item = deleteItem,
+                               let index = stockCodeTags.firstIndex(of: item) {
+                                stockCodeTags.remove(at: index)
+                            }
+                            deleteItem = nil
+                        }
+                        Button("キャンセル", role: .cancel) {
+                            deleteItem = nil
+                        }
                     }
                 }
             }
@@ -312,58 +324,6 @@ extension TrailingView {
             }
         }
     }
-    
-    // TODO: あとで消す
-//    func fetchStockValue(code: String, market: Market = .tokyo) {
-//        SwiftYFinance.chartDataBy(
-//            identifier: code + market.symbol,
-//            start: startDate,
-//            end: endDate){
-//                data, error in
-//                
-//                if error != nil {
-//                    print("エラー")
-//                    return
-//                }
-//                
-//                // 初日の始まり値で購入する想定
-//                guard let data = data, let startOpenPrice = data[0].open else {
-//                    return
-//                }
-//                
-//                var victoryOrDefeat: WinOrLose?
-//                
-//                data.forEach { value in
-//                    guard let high = value.high, let low = value.low, victoryOrDefeat == nil else {
-//                        return
-//                    }
-//                    
-//                    let highPriceDifference = high - startOpenPrice
-//                    let highPercent = highPriceDifference / startOpenPrice * 100
-//                    // 高値が始まり値より高い + 高値が利確値よりも高い
-//                    if high >= startOpenPrice && highPercent > Float(profitFixed) {
-//                        victoryOrDefeat = .win
-//                    }
-//                    
-//                    let lowPriceDifference = low - startOpenPrice
-//                    let lowParcent = lowPriceDifference / startOpenPrice * 100
-//                    // 安値が始まり値よりも低い + 安値が損切り値よりも低い
-//                    if low <= startOpenPrice && lowParcent < Float(-lossCut) {
-//                        victoryOrDefeat = .lose
-//                    }
-//                    
-//                    print("code: \(code), high: \(high), low: \(low), highPercent: \(highPercent), lowParcent: \(lowParcent)")
-//                }
-//                
-//                if victoryOrDefeat == nil {
-//                    victoryOrDefeat = .unsettled
-//                }
-//                
-//                stockList.append(.init(code: code, winOrLose: victoryOrDefeat!))
-//                isLoading = false
-//            }
-//        
-//    }
 }
 
 #Preview {

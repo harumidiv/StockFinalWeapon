@@ -9,13 +9,23 @@ import SwiftUI
 
 struct ChipsView<Content: View>: View {
     var spacing: CGFloat = 10
+    var animation: Animation = .easeInOut(duration: 0.2)
+    
     var tags: [StockCodeTag]
     @ViewBuilder var content: (StockCodeTag) -> Content
+    
+    var didSelect: (StockCodeTag) -> ()
 
     var body: some View {
         CustomClipLayout(spacing: spacing) {
             ForEach(tags) { tag in
                 content(tag)
+                    .contentShape(.rect)
+                    .onTapGesture {
+                        withAnimation(animation) {
+                            didSelect(tag)
+                        }
+                    }
             }
         }
     }
