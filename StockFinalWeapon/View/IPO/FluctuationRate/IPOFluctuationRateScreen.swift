@@ -1,5 +1,5 @@
 //
-//  IPOListView.swift
+//  IPOFluctuationRateScreen.swift
 //  StockChart
 //
 //  Created by 佐川 晴海 on 2025/07/16.
@@ -20,7 +20,7 @@ enum ComparisonType: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
-struct IPOListView: View {
+struct IPOFluctuationRateScreen: View {
     @State private var ipoInfos: [IPOInfo] = []
     @State private var threshold: Float = 100.0
     @State private var selectedComparison: ComparisonType = .greaterThanOrEqual
@@ -48,7 +48,7 @@ struct IPOListView: View {
                             .padding(.horizontal)
                         
                         List(ipoInfos, id: \.year) { info in
-                            NavigationLink(destination: IPODetailView(priceRizeParcentage: threshold, ipoInfo: info, comparison: selectedComparison)) {
+                            NavigationLink(destination: IPODetailScreen(priceRizeParcentage: threshold, ipoInfo: info, comparison: selectedComparison)) {
                                 Text("\(info.year)年")
                             }
                         }
@@ -76,7 +76,6 @@ struct IPOListView: View {
                     if year > 2017 {
                         codes = try extractAllStockCodes(from: html)
                     } else if year == 2017 || year == 2016 {
-                        print("😺: \(year)")
                         codes = try extractAllStockCodes2017AndBefore(from: html)
                     } else {
                         codes = try extractAllStockCodes2015AndBefore(from: html)
@@ -172,5 +171,5 @@ struct IPOListView: View {
 }
 
 #Preview {
-    IPOListView()
+    IPOFluctuationRateScreen()
 }

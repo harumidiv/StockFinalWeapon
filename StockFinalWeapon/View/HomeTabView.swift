@@ -39,18 +39,18 @@ struct HomeTabView: View {
             ForEach(AppTab.allCases, id: \.self) { tab in
                 switch tab {
                 case .yuutaiSakimawari:
-                    YuutaiMonthView()
+                    YuutaiMonthSelectScreen()
                         .tabItem {
                             Label(AppTab.yuutaiSakimawari.title, systemImage: AppTab.yuutaiSakimawari.icon)
                         }
                         .tag(AppTab.yuutaiSakimawari)
                 case .trailing:
-                    TrailingView()
+                    TrailingConditionsScreen()
                         .tabItem {
                             Label(AppTab.trailing.title, systemImage: AppTab.trailing.icon)
                         }
                 case .ipo:
-                    IPOListView()
+                    IPOFluctuationRateScreen()
                         .tabItem {
                             Label(AppTab.ipo.title, systemImage: AppTab.ipo.icon)
                         }

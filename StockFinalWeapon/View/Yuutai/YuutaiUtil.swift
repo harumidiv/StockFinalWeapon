@@ -38,6 +38,63 @@ struct YuutaiUtil {
         return String(format: "%.1f%%", percent)
     }
     
+    /// 対象銘柄の株価データを引っ張る
+    /// - Parameter code: 銘柄コード
+    /// - Returns: 株価データの配列
+    static func fetchStockData(code: String) async -> Result<[StockChartData], Error> {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM/dd"
+        // 存在しないデータはスキップされるのでかなり昔から取得
+        let start = dateFormatter.date(from: "1980/1/3")!
+        
+        do {
+            let data = try await SwiftYFinanceHelper.fetchChartData(
+                identifier: "\(code).T",
+                start: start,
+                end: Date()
+            )
+            return .success(data)
+        } catch {
+            return .failure(error)
+        }
+    }
+    
+    /// 値上がりを検証する
+    /// - Parameters:
+    ///   - stockChartData: 株価データ
+    ///   - purchaseDay: 購入日
+    ///   - saleDay: 売却日
+    /// - Returns: 結果のリスト
+    static func fetchStockPrice(
+        stockChartData: [StockChartData],
+        purchaseDay: Date,
+        saleDay: Date
+    ) async -> [StockChartPairData] {
+        let purchaseDayList = await extractPurchaseDataNearTargetDate(from: stockChartData, targetMonthDay: purchaseDay)
+        let saleDayList = await extractPurchaseDataNearTargetDate(from: stockChartData, targetMonthDay: saleDay)
+
+        let calendar = Calendar.current
+        var result: [StockChartPairData] = []
+
+        for purchase in purchaseDayList {
+            guard let purchaseDate = purchase.date else { continue }
+            let year = calendar.component(.year, from: purchaseDate)
+
+            let sameYearSale = saleDayList.first {
+                guard let saleDate = $0.date else { return false }
+                return calendar.component(.year, from: saleDate) == year
+            }
+
+            if let sameYearSaleDate = sameYearSale?.date {
+                let maxAndmin = findHighLowAdjClose(in: stockChartData, from: purchaseDate, to: sameYearSaleDate)
+                result.append(StockChartPairData(purchase: purchase, sale: sameYearSale, highestPrice: maxAndmin.max, lowestPrice: maxAndmin.min))
+            } else {
+                result.append(StockChartPairData(purchase: purchase, sale: sameYearSale))
+            }
+        }
+        return result
+    }
+    
     /// 値上がりを検証する
     /// - Parameters:
     ///   - code: 銘柄コード
@@ -60,8 +117,8 @@ struct YuutaiUtil {
                 end: endDate
             )
 
-            let purchaseDayList = extractPurchaseDataNearTargetDate(from: data, targetMonthDay: purchaseDay)
-            let saleDayList = extractPurchaseDataNearTargetDate(from: data, targetMonthDay: saleDay)
+            let purchaseDayList = await extractPurchaseDataNearTargetDate(from: data, targetMonthDay: purchaseDay)
+            let saleDayList = await extractPurchaseDataNearTargetDate(from: data, targetMonthDay: saleDay)
 
             let calendar = Calendar.current
             var result: [StockChartPairData] = []
@@ -113,41 +170,51 @@ struct YuutaiUtil {
         from data: [StockChartData],
         targetMonthDay: Date,
         searchDayOffsets: [Int] = [-1, 1, -2, 2, -3, 3]
-    ) -> [StockChartData] {
-        let calendar = Calendar.current
-        var result: [StockChartData] = []
-        let groupedByYear = Dictionary(grouping: data.compactMap { $0.date }, by: {
-            calendar.component(.year, from: $0)
-        })
-        for (year, _) in groupedByYear {
-            guard let baseDate = calendar.date(from: DateComponents(
-                year: year,
-                month: calendar.component(.month, from: targetMonthDay),
-                day: calendar.component(.day, from: targetMonthDay)
-            )) else {
-                continue
-            }
-            if let exact = data.first(where: {
-                guard let d = $0.date else { return false }
-                return calendar.isDate(d, inSameDayAs: baseDate)
-            }) {
-                result.append(exact)
-                continue
-            }
-            for offset in searchDayOffsets {
-                if let altDate = calendar.date(byAdding: .day, value: offset, to: baseDate),
-                   let near = data.first(where: {
-                       guard let d = $0.date else { return false }
-                       return calendar.isDate(d, inSameDayAs: altDate)
-                   }) {
-                    result.append(near)
-                    break
+    ) async -> [StockChartData] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let calendar = Calendar.current
+                var result: [StockChartData] = []
+                let groupedByYear = Dictionary(grouping: data.compactMap { $0.date }, by: {
+                    calendar.component(.year, from: $0)
+                })
+
+                for (year, _) in groupedByYear {
+                    guard let baseDate = calendar.date(from: DateComponents(
+                        year: year,
+                        month: calendar.component(.month, from: targetMonthDay),
+                        day: calendar.component(.day, from: targetMonthDay)
+                    )) else {
+                        continue
+                    }
+
+                    if let exact = data.first(where: {
+                        guard let d = $0.date else { return false }
+                        return calendar.isDate(d, inSameDayAs: baseDate)
+                    }) {
+                        result.append(exact)
+                        continue
+                    }
+
+                    for offset in searchDayOffsets {
+                        if let altDate = calendar.date(byAdding: .day, value: offset, to: baseDate),
+                           let near = data.first(where: {
+                               guard let d = $0.date else { return false }
+                               return calendar.isDate(d, inSameDayAs: altDate)
+                           }) {
+                            result.append(near)
+                            break
+                        }
+                    }
                 }
+
+                let sortedResult = result.sorted {
+                    guard let d1 = $0.date, let d2 = $1.date else { return false }
+                    return d1 < d2
+                }
+
+                continuation.resume(returning: sortedResult)
             }
-        }
-        return result.sorted {
-            guard let d1 = $0.date, let d2 = $1.date else { return false }
-            return d1 < d2
         }
     }
 }

@@ -8,7 +8,7 @@
 
 import Foundation
 
-// Date extension extracted from YuutaiAnticipationView.swift
+// Date extension extracted from WinningRateScreen.swift
 extension Date {
     /// "MM/dd" 形式の文字列を返す
     var monthDayString: String {
