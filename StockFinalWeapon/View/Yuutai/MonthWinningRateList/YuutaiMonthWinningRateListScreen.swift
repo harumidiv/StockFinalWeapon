@@ -56,6 +56,7 @@ struct YuutaiMonthWinningRateListScreen: View {
     @State private var selectedStock: StockWinningRate? = nil
     @State private var stockDisplayWinningRate: [StockWinningRate] = []
     @State private var isLoading: Bool = true
+    @State private var selectedYear: Int = 10
     
     private let baseURL = "https://www.kabuyutai.com/yutai/"
     @Binding var purchaseDate: Date
@@ -74,8 +75,18 @@ struct YuutaiMonthWinningRateListScreen: View {
         VStack {
             HStack {
                 let count = tanosiiYuutaiInfo.count == 0 ? "--" : tanosiiYuutaiInfo.count.description
-                Text("\(month.ja)優待  対象銘柄数: \(count)")
+                Text("\(month.ja)優待 \(count)銘柄")
+                
                 Spacer()
+                Text("検証")
+                Picker("数字を選択", selection: $selectedYear) {
+                                ForEach(5...20, id: \.self) { number in
+                                    Text("\(number)").tag(number)
+                                }
+                            }
+                            .pickerStyle(.wheel)
+                            .frame(width: 100, height: 50)
+                Text("年")
             }
             .padding(.horizontal)
             
@@ -213,12 +224,16 @@ private extension YuutaiMonthWinningRateListScreen {
     }
     
     func calculateWinnigRate(chartData: [StockChartData]) async -> (Float, Int) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy/MM/dd"
-        let start = dateFormatter.date(from: "2015/1/3")! // TODO: 外から入れられた方が良いかも！
+        let calendar = Calendar.current
+        let today = Date()
+        let tenYearsAgoYear = calendar.component(.year, from: today) - selectedYear
+        guard let tenYearsAgoJan3 = calendar.date(from: DateComponents(year: tenYearsAgoYear, month: 1, day: 3)) else {
+            fatalError("1/3日がないことはあり得ないので想定しないエラー")
+        }
+        
         let verificationPeriod = chartData.filter {
             if let date = $0.date {
-                return date > start
+                return date > tenYearsAgoJan3
             }
             return false
         }
