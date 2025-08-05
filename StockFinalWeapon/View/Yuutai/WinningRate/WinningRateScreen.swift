@@ -110,6 +110,8 @@ struct YuutaiAnticipationView: View {
                 .disabled(code.isEmpty)
             }
         }
+        .navigationTitle(stockChartPairData.isEmpty ? .constant("") : $code)
+        .navigationBarTitleDisplayMode(.inline)
     }
     
     private func fetchStockResult() async {

@@ -1,5 +1,5 @@
 import Foundation
-import SwiftYFinance
+@preconcurrency import SwiftYFinance
 
 struct YuutaiUtil {
     
