@@ -10,7 +10,7 @@ struct YuutaiUtil {
         let valid = data.compactMap { $0.valueChangeParcent }
         guard !valid.isEmpty else { return 0 }
         
-        let rising = valid.filter { $0 >= 0 }.count
+        let rising = valid.filter { $0 > 0 }.count
         let percent = Float(rising) / Float(valid.count) * 100
         
         return percent
