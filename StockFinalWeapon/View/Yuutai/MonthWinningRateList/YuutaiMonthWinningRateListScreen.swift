@@ -129,6 +129,12 @@ struct YuutaiMonthWinningRateListScreen: View {
                 }
             }
         }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button (action: {
