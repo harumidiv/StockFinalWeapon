@@ -27,6 +27,8 @@ struct TrailingConditionsScreen: View {
     
     @State private var showAlert: Bool = false
     @State private var deleteItem: StockCodeTag?
+
+    @State private var showErrorToast = false
     
     var body: some View {
         NavigationStack {
@@ -34,6 +36,15 @@ struct TrailingConditionsScreen: View {
                 stableView()
                 if isLoading {
                     loadingView()
+                }
+                if showErrorToast {
+                    VStack {
+                        ToastView(message: "⚠️ 銘柄が見つかりませんでした")
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .zIndex(1)
+                        Spacer()
+                    }
+                    .padding(.bottom, 40)
                 }
             }
             .navigationTitle("トレイリング検証")
@@ -136,9 +147,21 @@ struct TrailingConditionsScreen: View {
                                 market = .tokyo
                                 isLoading = false
                             } catch {
+                                withAnimation {
+                                    showErrorToast = true
+                                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                                }
+                                Task {
+                                   
+                                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                                    withAnimation {
+                                        showErrorToast = false
+                                    }
+                                }
+                                
                                 isLoading = false
-                                // TODO: エラーがわかるようにtoastなどを出す？
-                                print("エラー: \(error)")
+                                code = ""
+                                market = .tokyo
                             }
                         }
                         
