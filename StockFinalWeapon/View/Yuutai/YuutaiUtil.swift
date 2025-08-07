@@ -146,11 +146,15 @@ struct YuutaiUtil {
         targetMonthDay: Date,
         searchDayOffsets: [Int] = [-1, 1, -2, 2, -3, 3]
     ) async -> [MyStockChartData] {
-        await withCheckedContinuation { continuation in
+        let sendableData = data.map {
+            MyStockChartDataSendable(stockChartData: $0)
+        }
+        
+        return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let calendar = Calendar.current
-                var result: [MyStockChartData] = []
-                let groupedByYear = Dictionary(grouping: data.compactMap { $0.date }, by: {
+                var result: [MyStockChartDataSendable] = []
+                let groupedByYear = Dictionary(grouping: sendableData.compactMap { $0.date }, by: {
                     calendar.component(.year, from: $0)
                 })
 
@@ -163,7 +167,7 @@ struct YuutaiUtil {
                         continue
                     }
 
-                    if let exact = data.first(where: {
+                    if let exact = sendableData.first(where: {
                         guard let d = $0.date else { return false }
                         return calendar.isDate(d, inSameDayAs: baseDate)
                     }) {
@@ -173,7 +177,7 @@ struct YuutaiUtil {
 
                     for offset in searchDayOffsets {
                         if let altDate = calendar.date(byAdding: .day, value: offset, to: baseDate),
-                           let near = data.first(where: {
+                           let near = sendableData.first(where: {
                                guard let d = $0.date else { return false }
                                return calendar.isDate(d, inSameDayAs: altDate)
                            }) {
@@ -188,7 +192,7 @@ struct YuutaiUtil {
                     return d1 < d2
                 }
 
-                continuation.resume(returning: sortedResult)
+                continuation.resume(returning: sortedResult.compactMap { MyStockChartData(sendableStockChartData: $0)})
             }
         }
     }
