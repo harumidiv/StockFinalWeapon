@@ -10,78 +10,12 @@ import SwiftSoup
 import SwiftYFinance
 import SwiftData
 
-struct TanosiiYuutaiInfo: Codable {
-    let name: String
-    let code: String
-    let creditType: String?
-}
-
-@Model
-final class MyStockChartData {
-    var date: Date?
-    var volume: Int?
-    var open: Float?
-    var close: Float?
-    var adjclose: Float?
-    var low: Float?
-    var high: Float?
-    
-    init(stockChartData: StockChartData) {
-        date = stockChartData.date
-        volume = stockChartData.volume
-        open = stockChartData.open
-        close = stockChartData.close
-        adjclose = stockChartData.adjclose
-        low = stockChartData.low
-        high = stockChartData.high
-    }
-}
-
-@Model
-final class StockWinningRate: Identifiable, Hashable {
-    var month: YuutaiMonth
-    var name: String
-    var code: String
-    var creditType: String?
-    var stockChartData: [MyStockChartData]
-    
-    var winningRate: Float
-    var totalCount: Int
-    
-    init(month: YuutaiMonth, yuutaiInfo: TanosiiYuutaiInfo, stockChartData: [MyStockChartData], winningRate: Float, totalCount: Int) {
-        self.month = month
-        self.name = yuutaiInfo.name
-        self.code = yuutaiInfo.code
-        self.creditType = yuutaiInfo.creditType
-        self.stockChartData = stockChartData
-        self.winningRate = winningRate
-        self.totalCount = totalCount
-    }
-    
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(month)
-        hasher.combine(name)
-        hasher.combine(code)
-        hasher.combine(creditType)
-    }
-    
-    static func == (lhs: StockWinningRate, rhs: StockWinningRate) -> Bool {
-        return lhs.month == rhs.month &&
-        lhs.name == rhs.name &&
-        lhs.code == rhs.code &&
-        lhs.creditType == rhs.creditType
-    }
-}
-
 struct YuutaiMonthWinningRateListScreen: View {
     // 特定月の銘柄リスト
     @State private var tanosiiYuutaiInfo: [TanosiiYuutaiInfo] = []
     
     @Environment(\.modelContext) private var context
     
-//    @Query(filter: #Predicate<StockWinningRate> { $0.month == .january },
-//           sort: [SortDescriptor(\.winningRate, order: .reverse)])
-//    private var stockDisplayWinningRate: [StockWinningRate]
     @State private var stockDisplayWinningRate: [StockWinningRate] = []
     
     @State private var selectedStock: StockWinningRate? = nil
