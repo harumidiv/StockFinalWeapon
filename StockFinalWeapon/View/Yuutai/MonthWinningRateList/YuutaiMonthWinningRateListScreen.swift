@@ -170,22 +170,9 @@ struct YuutaiMonthWinningRateListScreen: View {
                 Button (action: {
                     Task {
                         isLoading = true
-                        var newData: [StockWinningRate] = []
-
-                        for item in stockDisplayWinningRate {
-                            let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
-                            let result = StockWinningRate(
-                                month: month, yuutaiInfo: .init(name: item.name, code: item.code, creditType: item.creditType),
-                                stockChartData: item.stockChartData,
-                                winningRate: winningRate,
-                                totalCount: trialCount
-                            )
-                            newData.append(result)
+                        stockDisplayWinningRate = await fetchChartData(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
+                            $0.winningRate > $1.winningRate
                         }
-                        // TODO Query部分でsortする
-//                        stockDisplayWinningRate = newData.sorted {
-//                            $0.winningRate > $1.winningRate
-//                        }
                         isLoading = false
                     }
                     
@@ -228,7 +215,20 @@ struct YuutaiMonthWinningRateListScreen: View {
         let cacheData = allData?.filter { $0.month == month }
 
         if let cacheData, !cacheData.isEmpty {
-            return cacheData
+            // 新しい日付でデータを更新
+            var newWinningData: [StockWinningRate] = []
+            for item in cacheData {
+                let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
+                let result = StockWinningRate(
+                    month: month, yuutaiInfo: .init(name: item.name, code: item.code, creditType: item.creditType),
+                    stockChartData: item.stockChartData,
+                    winningRate: winningRate,
+                    totalCount: trialCount
+                )
+                newWinningData.append(result)
+            }
+
+            return newWinningData
         }
 
         let newData = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
