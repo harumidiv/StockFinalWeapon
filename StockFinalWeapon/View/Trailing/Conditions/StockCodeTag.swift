@@ -32,7 +32,7 @@ struct StockCodeTag: Identifiable, Hashable {
     let id = UUID()
     let code: String
     let market: Market
-    let chartData: [StockChartData]
+    let chartData: [MyStockChartData]
     
     func winOrLose(start: Date, end: Date, profitFixed: Int, lossCut: Int) -> WinOrLose {
         let rangeData = chartData.filter { chart in

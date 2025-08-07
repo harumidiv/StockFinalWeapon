@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-enum YuutaiMonth: CaseIterable, Identifiable {
+enum YuutaiMonth: String, CaseIterable, Identifiable, Codable {
     case january
     case february
     case march
@@ -49,35 +49,6 @@ enum YuutaiMonth: CaseIterable, Identifiable {
             return "11月"
         case .december:
             return "12月"
-        }
-    }
-    
-    var en: String {
-        switch self {
-        case .january:
-            return "january"
-        case .february:
-            return "february"
-        case .march:
-            return "march"
-        case .april:
-            return "april"
-        case .may:
-            return "may"
-        case .june:
-            return "june"
-        case .july:
-            return "july"
-        case .august:
-            return "august"
-        case .september:
-            return "september"
-        case .october:
-            return "october"
-        case .november:
-            return "november"
-        case .december:
-            return "december"
         }
     }
 }

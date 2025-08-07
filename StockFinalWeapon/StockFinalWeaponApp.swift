@@ -6,12 +6,14 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct StockFinalWeaponApp: App {
     var body: some Scene {
         WindowGroup {
             HomeTabView()
+                .modelContainer(for: StockWinningRate.self)
         }
     }
 }

@@ -41,7 +41,7 @@ struct YuutaiUtil {
     /// 対象銘柄の株価データを引っ張る
     /// - Parameter code: 銘柄コード
     /// - Returns: 株価データの配列
-    static func fetchStockData(code: String) async -> Result<[StockChartData], Error> {
+    static func fetchStockData(code: String) async -> Result<[MyStockChartData], Error> {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy/MM/dd"
         // 存在しないデータはスキップされるのでかなり昔から取得
@@ -53,7 +53,7 @@ struct YuutaiUtil {
                 start: start,
                 end: Date()
             )
-            return .success(data)
+            return .success(data.compactMap{ MyStockChartData(stockChartData: $0)})
         } catch {
             return .failure(error)
         }
@@ -66,7 +66,7 @@ struct YuutaiUtil {
     ///   - saleDay: 売却日
     /// - Returns: 結果のリスト
     static func fetchStockPrice(
-        stockChartData: [StockChartData],
+        stockChartData: [MyStockChartData],
         purchaseDay: Date,
         saleDay: Date
     ) async -> [StockChartPairData] {
@@ -115,7 +115,7 @@ struct YuutaiUtil {
                 identifier: "\(code).T",
                 start: startDate,
                 end: endDate
-            )
+            ).compactMap{ MyStockChartData(stockChartData: $0)}
 
             let purchaseDayList = await extractPurchaseDataNearTargetDate(from: data, targetMonthDay: purchaseDay)
             let saleDayList = await extractPurchaseDataNearTargetDate(from: data, targetMonthDay: saleDay)
@@ -146,7 +146,7 @@ struct YuutaiUtil {
     }
 
     static func findHighLowAdjClose(
-        in data: [StockChartData],
+        in data: [MyStockChartData],
         from startDate: Date,
         to endDate: Date
     ) -> (min: Float?, max: Float?) {
@@ -167,14 +167,14 @@ struct YuutaiUtil {
     ///   - searchDayOffsets: 前後3日までの値で一番初めに見つかった値を使用
     /// - Returns: 毎年の特定の日付もしくは近い日付の株価のデータ
     static func extractPurchaseDataNearTargetDate(
-        from data: [StockChartData],
+        from data: [MyStockChartData],
         targetMonthDay: Date,
         searchDayOffsets: [Int] = [-1, 1, -2, 2, -3, 3]
-    ) async -> [StockChartData] {
+    ) async -> [MyStockChartData] {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let calendar = Calendar.current
-                var result: [StockChartData] = []
+                var result: [MyStockChartData] = []
                 let groupedByYear = Dictionary(grouping: data.compactMap { $0.date }, by: {
                     calendar.component(.year, from: $0)
                 })

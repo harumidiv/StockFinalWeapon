@@ -224,7 +224,7 @@ extension TrailingConditionsScreen {
                     return
                 }
                 
-                continuation.resume(returning: StockCodeTag(code: code, market: market, chartData: data))
+                continuation.resume(returning: StockCodeTag(code: code, market: market, chartData: data.compactMap{ MyStockChartData(stockChartData: $0)}))
             }
         }
     }
