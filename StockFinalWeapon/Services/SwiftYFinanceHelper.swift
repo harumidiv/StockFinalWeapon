@@ -3,7 +3,7 @@
 import Foundation
 import SwiftYFinance
 
-class SwiftYFinanceHelper {
+final class SwiftYFinanceHelper {
     /// Fetch chart data via SwiftYFinance in async/await style
     static func fetchChartData(identifier: String, start: Date, end: Date) async throws -> [StockChartData] {
         return try await withCheckedThrowingContinuation { continuation in

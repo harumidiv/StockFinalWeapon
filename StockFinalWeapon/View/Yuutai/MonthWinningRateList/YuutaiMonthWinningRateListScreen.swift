@@ -320,7 +320,7 @@ private extension YuutaiMonthWinningRateListScreen {
         // 存在しないデータはスキップされるのでかなり昔から取得
         let start = dateFormatter.date(from: "1980/1/3")!
         
-        let result = await YahooYFinanceAPIService().fetchStockData(code: code, startDate: start, endDate: Date())
+        let result = await YahooYFinanceAPIService().fetchMyStockChartData(code: code, startDate: start, endDate: Date())
         switch result {
         case .success(let stockChartData):
             let winningRateAndTrialCount = await calculateWinnigRate(chartData: stockChartData)
