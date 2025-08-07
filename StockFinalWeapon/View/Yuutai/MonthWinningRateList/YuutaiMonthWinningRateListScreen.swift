@@ -315,7 +315,12 @@ private extension YuutaiMonthWinningRateListScreen {
     }
     
     func fetchWinningRateAndTrialCount(for code: String) async -> ([MyStockChartData], Float, Int)? {
-        let result = await YuutaiUtil.fetchStockData(code: code)
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM/dd"
+        // 存在しないデータはスキップされるのでかなり昔から取得
+        let start = dateFormatter.date(from: "1980/1/3")!
+        
+        let result = await YahooYFinanceAPIService().fetchStockData(code: code, startDate: start, endDate: Date())
         switch result {
         case .success(let stockChartData):
             let winningRateAndTrialCount = await calculateWinnigRate(chartData: stockChartData)

@@ -38,27 +38,6 @@ struct YuutaiUtil {
         return String(format: "%.1f%%", percent)
     }
     
-    /// 対象銘柄の株価データを引っ張る
-    /// - Parameter code: 銘柄コード
-    /// - Returns: 株価データの配列
-    static func fetchStockData(code: String) async -> Result<[MyStockChartData], Error> {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy/MM/dd"
-        // 存在しないデータはスキップされるのでかなり昔から取得
-        let start = dateFormatter.date(from: "1980/1/3")!
-        
-        do {
-            let data = try await SwiftYFinanceHelper.fetchChartData(
-                identifier: "\(code).T",
-                start: start,
-                end: Date()
-            )
-            return .success(data.compactMap{ MyStockChartData(stockChartData: $0)})
-        } catch {
-            return .failure(error)
-        }
-    }
-    
     /// 値上がりを検証する
     /// - Parameters:
     ///   - stockChartData: 株価データ
@@ -110,15 +89,11 @@ struct YuutaiUtil {
         purchaseDay: Date,
         saleDay: Date
     ) async -> Result<[StockChartPairData], Error> {
-        do {
-            let data = try await SwiftYFinanceHelper.fetchChartData(
-                identifier: "\(code).T",
-                start: startDate,
-                end: endDate
-            ).compactMap{ MyStockChartData(stockChartData: $0)}
-
-            let purchaseDayList = await extractPurchaseDataNearTargetDate(from: data, targetMonthDay: purchaseDay)
-            let saleDayList = await extractPurchaseDataNearTargetDate(from: data, targetMonthDay: saleDay)
+        let result = await YahooYFinanceAPIService().fetchStockData(code: code, startDate: startDate, endDate: endDate)
+        switch result {
+        case .success(let chartData):
+            let purchaseDayList = await extractPurchaseDataNearTargetDate(from: chartData, targetMonthDay: purchaseDay)
+            let saleDayList = await extractPurchaseDataNearTargetDate(from: chartData, targetMonthDay: saleDay)
 
             let calendar = Calendar.current
             var result: [StockChartPairData] = []
@@ -133,14 +108,14 @@ struct YuutaiUtil {
                 }
 
                 if let sameYearSaleDate = sameYearSale?.date {
-                    let maxAndmin = findHighLowAdjClose(in: data, from: purchaseDate, to: sameYearSaleDate)
+                    let maxAndmin = findHighLowAdjClose(in: chartData, from: purchaseDate, to: sameYearSaleDate)
                     result.append(StockChartPairData(purchase: purchase, sale: sameYearSale, highestPrice: maxAndmin.max, lowestPrice: maxAndmin.min))
                 } else {
                     result.append(StockChartPairData(purchase: purchase, sale: sameYearSale))
                 }
             }
             return .success(result)
-        } catch {
+        case .failure(let error):
             return .failure(error)
         }
     }

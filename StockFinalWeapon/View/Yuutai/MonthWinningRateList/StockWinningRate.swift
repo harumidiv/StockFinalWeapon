@@ -14,7 +14,7 @@ final class StockWinningRate: Identifiable, Hashable {
     var code: String
     var creditType: String?
     var stockChartData: [MyStockChartData]
-    
+    // FIXME: ここで持つべきじゃないかもしれないが、リスト表示時に計算すると重くなってしまうので要検討
     var winningRate: Float
     var totalCount: Int
     
@@ -26,19 +26,5 @@ final class StockWinningRate: Identifiable, Hashable {
         self.stockChartData = stockChartData
         self.winningRate = winningRate
         self.totalCount = totalCount
-    }
-    
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(month)
-        hasher.combine(name)
-        hasher.combine(code)
-        hasher.combine(creditType)
-    }
-    
-    static func == (lhs: StockWinningRate, rhs: StockWinningRate) -> Bool {
-        return lhs.month == rhs.month &&
-        lhs.name == rhs.name &&
-        lhs.code == rhs.code &&
-        lhs.creditType == rhs.creditType
     }
 }
