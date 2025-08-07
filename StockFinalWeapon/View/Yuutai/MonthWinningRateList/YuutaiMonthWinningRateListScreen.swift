@@ -9,7 +9,7 @@ import SwiftUI
 import SwiftSoup
 import SwiftYFinance
 
-struct TanosiiYuutaiInfo {
+struct TanosiiYuutaiInfo: Codable {
     let name: String
     let code: String
     let creditType: String?
@@ -61,7 +61,7 @@ struct YuutaiMonthWinningRateListScreen: View {
     private let baseURL = "https://www.kabuyutai.com/yutai/"
     @Binding var purchaseDate: Date
     @Binding var saleDate: Date
-    let month: SelectedMonth
+    let month: YuutaiMonth
     
     var verificationRange: String {
         let formatter = DateFormatter()
@@ -176,7 +176,16 @@ struct YuutaiMonthWinningRateListScreen: View {
             // 個別の検証から戻った時に通信が走ってしまうので弾く
             if stockDisplayWinningRate.isEmpty {
                 isLoading = true
-                tanosiiYuutaiInfo = await fetchStockInfo()
+                // TODO ちゃんと治す
+                if let januaryData = UserStore.january {
+                    print("😺: キャッシュ")
+                    tanosiiYuutaiInfo = januaryData
+                } else {
+                    print("😺: 新規")
+                    let infoData = await fetchStockInfo()
+                    UserStore.january = infoData
+                    tanosiiYuutaiInfo = infoData
+                }
                 
                 let infoList = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
                 stockDisplayWinningRate = infoList.sorted {
@@ -185,6 +194,35 @@ struct YuutaiMonthWinningRateListScreen: View {
                 isLoading = false
             }
         }
+    }
+    
+    private func getYuutaiCodeList() {
+//        switch month {
+//        case .january:
+//
+//        case .february:
+//            <#code#>
+//        case .march:
+//            <#code#>
+//        case .april:
+//            <#code#>
+//        case .may:
+//            <#code#>
+//        case .june:
+//            <#code#>
+//        case .july:
+//            <#code#>
+//        case .august:
+//            <#code#>
+//        case .september:
+//            <#code#>
+//        case .october:
+//            <#code#>
+//        case .november:
+//            <#code#>
+//        case .december:
+//            <#code#>
+//        }
     }
 }
 
@@ -333,6 +371,6 @@ private extension YuutaiMonthWinningRateListScreen {
 
 
 #Preview {
-    YuutaiMonthWinningRateListScreen(purchaseDate: .constant(.now), saleDate: .constant(.now), month: .init(ja: "1月", en: "january"))
+    YuutaiMonthWinningRateListScreen(purchaseDate: .constant(.now), saleDate: .constant(.now), month: .january)
 }
 

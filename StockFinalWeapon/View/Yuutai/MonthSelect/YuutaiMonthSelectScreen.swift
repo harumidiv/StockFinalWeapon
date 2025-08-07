@@ -7,30 +7,85 @@
 
 import SwiftUI
 
-struct SelectedMonth: Identifiable, Equatable, Hashable {
-    let id = UUID()
-    let ja: String
-    let en: String
+enum YuutaiMonth: CaseIterable, Identifiable {
+    case january
+    case february
+    case march
+    case april
+    case may
+    case june
+    case july
+    case august
+    case september
+    case october
+    case november
+    case december
+    
+    var id: Self { self }
+    
+    var ja: String {
+        switch self {
+        case .january:
+            return "1月"
+        case .february:
+            return "2月"
+        case .march:
+            return "3月"
+        case .april:
+            return "4月"
+        case .may:
+            return "5月"
+        case .june:
+            return "6月"
+        case .july:
+            return "7月"
+        case .august:
+            return "8月"
+        case .september:
+            return "9月"
+        case .october:
+            return "10月"
+        case .november:
+            return "11月"
+        case .december:
+            return "12月"
+        }
+    }
+    
+    var en: String {
+        switch self {
+        case .january:
+            return "january"
+        case .february:
+            return "february"
+        case .march:
+            return "march"
+        case .april:
+            return "april"
+        case .may:
+            return "may"
+        case .june:
+            return "june"
+        case .july:
+            return "july"
+        case .august:
+            return "august"
+        case .september:
+            return "september"
+        case .october:
+            return "october"
+        case .november:
+            return "november"
+        case .december:
+            return "december"
+        }
+    }
 }
 
 struct YuutaiMonthSelectScreen: View {
-    private let months: [SelectedMonth] = [
-        .init(ja: "1月", en: "january"),
-        .init(ja: "2月", en: "february"),
-        .init(ja: "3月", en: "march"),
-        .init(ja: "4月", en: "april"),
-        .init(ja: "5月", en: "may"),
-        .init(ja: "6月", en: "june"),
-        .init(ja: "7月", en: "july"),
-        .init(ja: "8月", en: "august"),
-        .init(ja: "9月", en: "september"),
-        .init(ja: "10月", en: "october"),
-        .init(ja: "11月", en: "november"),
-        .init(ja: "12月", en: "december")
-    ]
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
     
-    @State private var selectedMonth: SelectedMonth? = nil
+    @State private var selectedMonth: YuutaiMonth? = nil
     @State private var purchaseDate: Date = Date()
     @State private var saleDate: Date = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
     @State private var code: String = ""
@@ -49,9 +104,9 @@ struct YuutaiMonthSelectScreen: View {
                 
                 Section(header: Text("優待券権利月選択")) {
                     LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(months, id: \.id) { month in
+                        ForEach(YuutaiMonth.allCases) { month in
                             Button(action: {
-                                path.append(month)  // ← SelectedMonthをpush
+                                path.append(month)
                             }) {
                                 Text(month.ja)
                                     .font(.headline)
@@ -72,7 +127,7 @@ struct YuutaiMonthSelectScreen: View {
                 }
             }
             .navigationTitle("優待先周り")
-            .navigationDestination(for: SelectedMonth.self) { month in
+            .navigationDestination(for: YuutaiMonth.self) { month in
                 YuutaiMonthWinningRateListScreen(
                     purchaseDate: $purchaseDate,
                     saleDate: $saleDate,
