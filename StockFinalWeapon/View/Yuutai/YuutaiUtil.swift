@@ -89,7 +89,7 @@ struct YuutaiUtil {
         purchaseDay: Date,
         saleDay: Date
     ) async -> Result<[StockChartPairData], Error> {
-        let result = await YahooYFinanceAPIService().fetchMyStockChartData(code: code, startDate: startDate, endDate: endDate)
+        let result = await YahooYFinanceAPIService().fetchStockChartData(code: code, startDate: startDate, endDate: endDate)
         switch result {
         case .success(let chartData):
             let purchaseDayList = await extractPurchaseDataNearTargetDate(from: chartData, targetMonthDay: purchaseDay)

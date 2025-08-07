@@ -186,7 +186,7 @@ struct TrailingConditionsScreen: View {
         dateFormatter.dateFormat = "yyyy/MM/dd"
         let start = dateFormatter.date(from: "2000/1/3")!
         
-        let result = await YahooYFinanceAPIService().fetchMyStockChartData(code: code, symbol: market.symbol, startDate: start, endDate: Date())
+        let result = await YahooYFinanceAPIService().fetchStockChartData(code: code, symbol: market.symbol, startDate: start, endDate: Date())
         
         switch result {
         case .success(let data):

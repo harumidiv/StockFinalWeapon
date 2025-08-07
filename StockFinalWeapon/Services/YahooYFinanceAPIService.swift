@@ -15,8 +15,8 @@ struct YahooYFinanceAPIService {
     ///   - symbol: Yahoofinanceでの市場のシンボル
     ///   - startDate: 計測開始日
     ///   - endDate: 計測終了日
-    /// - Returns: SwiftDataへ保存する用のモデル
-    func fetchMyStockChartData(code: String, symbol: String = "T", startDate: Date, endDate: Date) async -> Result<[MyStockChartData], Error> {
+    /// - Returns: 通信結果
+    func fetchStockChartData(code: String, symbol: String = "T", startDate: Date, endDate: Date) async -> Result<[MyStockChartData], Error> {
         do {
             let data = try await SwiftYFinanceHelper.fetchChartData(
                 identifier: "\(code).\(symbol)",
@@ -24,27 +24,6 @@ struct YahooYFinanceAPIService {
                 end: endDate
             )
             return .success(data.compactMap{ MyStockChartData(stockChartData: $0)})
-        } catch {
-            return .failure(error)
-        }
-    }
-    
-    
-    ///  APIからチャートデータを取得する
-    /// - Parameters:
-    ///   - code: 銘柄コード
-    ///   - symbol: Yahoofinanceでの市場のシンボル
-    ///   - startDate: 計測開始日
-    ///   - endDate: 計測終了日
-    /// - Returns: SwiftYFinanceのモデル
-    func fetchStockChartData(code: String, symbol: String = "T", startDate: Date, endDate: Date) async -> Result<[StockChartData], Error> {
-        do {
-            let data = try await SwiftYFinanceHelper.fetchChartData(
-                identifier: "\(code).\(symbol)",
-                start: startDate,
-                end: endDate
-            )
-            return .success(data)
         } catch {
             return .failure(error)
         }
