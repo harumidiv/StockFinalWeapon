@@ -176,16 +176,8 @@ struct YuutaiMonthWinningRateListScreen: View {
             // 個別の検証から戻った時に通信が走ってしまうので弾く
             if stockDisplayWinningRate.isEmpty {
                 isLoading = true
-                // TODO ちゃんと治す
-                if let januaryData = UserStore.january {
-                    print("😺: キャッシュ")
-                    tanosiiYuutaiInfo = januaryData
-                } else {
-                    print("😺: 新規")
-                    let infoData = await fetchStockInfo()
-                    UserStore.january = infoData
-                    tanosiiYuutaiInfo = infoData
-                }
+                
+                tanosiiYuutaiInfo = await getYuutaiCodeList()
                 
                 let infoList = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
                 stockDisplayWinningRate = infoList.sorted {
@@ -196,33 +188,117 @@ struct YuutaiMonthWinningRateListScreen: View {
         }
     }
     
-    private func getYuutaiCodeList() {
-//        switch month {
-//        case .january:
-//
-//        case .february:
-//            <#code#>
-//        case .march:
-//            <#code#>
-//        case .april:
-//            <#code#>
-//        case .may:
-//            <#code#>
-//        case .june:
-//            <#code#>
-//        case .july:
-//            <#code#>
-//        case .august:
-//            <#code#>
-//        case .september:
-//            <#code#>
-//        case .october:
-//            <#code#>
-//        case .november:
-//            <#code#>
-//        case .december:
-//            <#code#>
-//        }
+    private func getYuutaiCodeList() async -> [TanosiiYuutaiInfo] {
+        switch month {
+        case .january:
+            if let cache = UserStore.january {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.january = infoData
+                return infoData
+            }
+
+        case .february:
+            if let cache = UserStore.february {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.february = infoData
+                return infoData
+            }
+            
+        case .march:
+            if let cache = UserStore.march {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.march = infoData
+                return infoData
+            }
+            
+        case .april:
+            if let cache = UserStore.april {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.april = infoData
+                return infoData
+            }
+            
+        case .may:
+            if let cache = UserStore.may {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.may = infoData
+                return infoData
+            }
+            
+        case .june:
+            if let cache = UserStore.june {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.june = infoData
+                return infoData
+            }
+            
+        case .july:
+            if let cache = UserStore.july {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.july = infoData
+                return infoData
+            }
+            
+        case .august:
+            if let cache = UserStore.august {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.august = infoData
+                return infoData
+            }
+            
+        case .september:
+            if let cache = UserStore.september {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.september = infoData
+                return infoData
+            }
+            
+        case .october:
+            if let cache = UserStore.october {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.october = infoData
+                return infoData
+            }
+            
+        case .november:
+            if let cache = UserStore.november {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.november = infoData
+                return infoData
+            }
+            
+        case .december:
+            if let cache = UserStore.december {
+                return cache
+            } else {
+                let infoData = await fetchStockInfo()
+                UserStore.december = infoData
+                return infoData
+            }
+            
+        }
     }
 }
 

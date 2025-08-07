@@ -30,9 +30,7 @@ final class UserStore {
                 if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
                     return infos
                 }
-            } else {
-                print("😺: 失敗")
-            }
+            } 
             return nil
         }
         set {
@@ -40,152 +38,216 @@ final class UserStore {
             if let encoded = try? encoder.encode(newValue) {
                 UserDefaults.standard.set(encoded, forKey: Key.january.rawValue)
                 UserDefaults.standard.synchronize()
-            } else {
-                print("😺: 保存エラー")
-            }
+            } 
         }
     }
     
-    static var february: [String] {
+    static var february: [TanosiiYuutaiInfo]? {
         get {
-            guard let february = UserDefaults.standard.array(forKey: Key.february.rawValue) as? [String] else {
-                return []
-            }
-            return february
+            if let data = UserDefaults.standard.data(forKey: Key.february.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.february.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.february.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var march: [String] {
+    static var march: [TanosiiYuutaiInfo]? {
         get {
-            guard let march = UserDefaults.standard.array(forKey: Key.march.rawValue) as? [String] else {
-                return []
-            }
-            return march
+            if let data = UserDefaults.standard.data(forKey: Key.march.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.march.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.march.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var april: [String] {
+    static var april: [TanosiiYuutaiInfo]? {
         get {
-            guard let april = UserDefaults.standard.array(forKey: Key.april.rawValue) as? [String] else {
-                return []
-            }
-            return april
+            if let data = UserDefaults.standard.data(forKey: Key.april.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.april.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.april.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var may: [String] {
+    static var may: [TanosiiYuutaiInfo]? {
         get {
-            guard let may = UserDefaults.standard.array(forKey: Key.may.rawValue) as? [String] else {
-                return []
-            }
-            return may
+            if let data = UserDefaults.standard.data(forKey: Key.may.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.may.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.may.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var june: [String] {
+    static var june: [TanosiiYuutaiInfo]? {
         get {
-            guard let june = UserDefaults.standard.array(forKey: Key.june.rawValue) as? [String] else {
-                return []
-            }
-            return june
+            if let data = UserDefaults.standard.data(forKey: Key.june.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.june.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.june.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var july: [String] {
+    static var july: [TanosiiYuutaiInfo]? {
         get {
-            guard let july = UserDefaults.standard.array(forKey: Key.july.rawValue) as? [String] else {
-                return []
-            }
-            return july
+            if let data = UserDefaults.standard.data(forKey: Key.july.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.july.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.july.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var august: [String] {
+    static var august: [TanosiiYuutaiInfo]? {
         get {
-            guard let august = UserDefaults.standard.array(forKey: Key.august.rawValue) as? [String] else {
-                return []
-            }
-            return august
+            if let data = UserDefaults.standard.data(forKey: Key.august.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.august.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.august.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var september: [String] {
+    static var september: [TanosiiYuutaiInfo]? {
         get {
-            guard let september = UserDefaults.standard.array(forKey: Key.september.rawValue) as? [String] else {
-                return []
-            }
-            return september
+            if let data = UserDefaults.standard.data(forKey: Key.september.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.september.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.september.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var october: [String] {
+    static var october: [TanosiiYuutaiInfo]? {
         get {
-            guard let october = UserDefaults.standard.array(forKey: Key.october.rawValue) as? [String] else {
-                return []
-            }
-            return october
+            if let data = UserDefaults.standard.data(forKey: Key.october.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.october.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.october.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var november: [String] {
+    static var november: [TanosiiYuutaiInfo]? {
         get {
-            guard let november = UserDefaults.standard.array(forKey: Key.november.rawValue) as? [String] else {
-                return []
-            }
-            return november
+            if let data = UserDefaults.standard.data(forKey: Key.november.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.november.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.november.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
     
-    static var december: [String] {
+    static var december: [TanosiiYuutaiInfo]? {
         get {
-            guard let december = UserDefaults.standard.array(forKey: Key.december.rawValue) as? [String] else {
-                return []
-            }
-            return december
+            if let data = UserDefaults.standard.data(forKey: Key.december.rawValue) {
+                let decoder = JSONDecoder()
+                if let infos = try? decoder.decode([TanosiiYuutaiInfo].self, from: data) {
+                    return infos
+                }
+            } 
+            return nil
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Key.december.rawValue)
-            UserDefaults.standard.synchronize()
+            let encoder = JSONEncoder()
+            if let encoded = try? encoder.encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: Key.december.rawValue)
+                UserDefaults.standard.synchronize()
+            } 
         }
     }
 }
