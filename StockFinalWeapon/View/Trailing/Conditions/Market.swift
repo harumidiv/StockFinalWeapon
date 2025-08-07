@@ -19,13 +19,13 @@ enum Market: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .tokyo:
-            return ".T"
+            return "T"
         case .nagoya:
-            return ".N"
+            return "N"
         case .sapporo:
-            return ".S"
+            return "S"
         case .hukuoka:
-            return ".F"
+            return "F"
         case .none:
             return ""
         }

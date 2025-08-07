@@ -135,36 +135,16 @@ struct TrailingConditionsScreen: View {
                     
                     Button (action: {
                         Task {
-                            do {
-                                isFocused = false
-                                isLoading = true
-                                let result = try await fetchStockValue(code: code, market: market)
-                                print("取得成功: \(result)")
-                                stockCodeTags.append(result)
-                                
-                                // 初期化
-                                code = ""
-                                market = .tokyo
-                                isLoading = false
-                            } catch {
-                                withAnimation {
-                                    showErrorToast = true
-                                    UINotificationFeedbackGenerator().notificationOccurred(.error)
-                                }
-                                Task {
-                                   
-                                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                                    withAnimation {
-                                        showErrorToast = false
-                                    }
-                                }
-                                
-                                isLoading = false
-                                code = ""
-                                market = .tokyo
-                            }
+                            isFocused = false
+                            isLoading = true
+                            
+                            await addTag()
+                            
+                            // 初期化
+                            code = ""
+                            market = .tokyo
+                            isLoading = false
                         }
-                        
                     }, label: {
                         Label("追加", systemImage: "plus")
                             .foregroundColor(.white)
@@ -199,32 +179,33 @@ struct TrailingConditionsScreen: View {
             }
         }
     }
-}
-
-extension TrailingConditionsScreen {
-    func fetchStockValue(code: String, market: Market) async throws -> StockCodeTag {
-        try await withCheckedThrowingContinuation { continuation in
-            // 詳細画面で再利用できるように古めの情報から保持しておく
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyy/MM/dd"
-            let start = dateFormatter.date(from: "2000/1/3")!
+    
+    private func addTag() async {
+        // 詳細画面で再利用できるように古めの情報から保持しておく
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM/dd"
+        let start = dateFormatter.date(from: "2000/1/3")!
+        
+        let result = await YahooYFinanceAPIService().fetchMyStockChartData(code: code, symbol: market.symbol, startDate: start, endDate: Date())
+        
+        switch result {
+        case .success(let data):
+            let tag = StockCodeTag(code: code, market: market, chartData: data)
+            stockCodeTags.append(tag)
             
-            SwiftYFinance.chartDataBy(
-                identifier: code + market.symbol,
-                start: start,
-                end: endDate
-            ) { data, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
+            
+            
+        case .failure(_):
+            withAnimation {
+                showErrorToast = true
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+            Task {
                 
-                guard let data = data else {
-                    continuation.resume(throwing: NSError(domain: "No open price", code: 0))
-                    return
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                withAnimation {
+                    showErrorToast = false
                 }
-                
-                continuation.resume(returning: StockCodeTag(code: code, market: market, chartData: data.compactMap{ MyStockChartData(stockChartData: $0)}))
             }
         }
     }
