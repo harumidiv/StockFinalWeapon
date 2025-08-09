@@ -206,11 +206,11 @@ struct YuutaiMonthWinningRateListScreen: View {
     }
     
     private func getYuutaiCodeList() async -> [TanosiiYuutaiInfo] {
-        if let cache = UserStore.cache(for: month) {
+        if let cache = month.tanosiiYuutaiInfo {
             return cache
         } else {
             let infoData = await fetchStockInfo()
-            UserStore.setCache(infoData, for: month)
+            UserStore.setYuutaiInfo(infoData, for: month)
             return infoData
         }
     }
