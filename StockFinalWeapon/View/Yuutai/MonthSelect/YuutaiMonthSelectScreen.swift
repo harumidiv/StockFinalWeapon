@@ -51,6 +51,10 @@ enum YuutaiMonth: String, CaseIterable, Identifiable, Codable {
             return "12月"
         }
     }
+    
+    var tanosiiYuutaiInfo: [TanosiiYuutaiInfo]? {
+        UserStore.getYuutaiInfo(for: self)
+    }
 }
 
 struct YuutaiMonthSelectScreen: View {

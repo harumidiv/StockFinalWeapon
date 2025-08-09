@@ -18,9 +18,10 @@ struct YuutaiMonthWinningRateListScreen: View {
     
     @State private var stockDisplayWinningRate: [StockWinningRate] = []
     
-    @State private var selectedStock: StockWinningRate? = nil
+    @State private var selectedStock: YuutaiSakimawariChartModel? = nil
     @State private var isLoading: Bool = true
     @State private var selectedYear: Int = 10
+    @State private var selectedWinParcent: Int = 0
     
     private let baseURL = "https://www.kabuyutai.com/yutai/"
     @Binding var purchaseDate: Date
@@ -36,20 +37,90 @@ struct YuutaiMonthWinningRateListScreen: View {
     }
     
     var body: some View {
+        stableView()
+            .loading(isLoading)
+            .onAppear {
+                UIApplication.shared.isIdleTimerDisabled = true
+            }
+            .onDisappear {
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button (action: {
+                        Task {
+                            isLoading = true
+                            stockDisplayWinningRate = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
+                                $0.winningRate > $1.winningRate
+                            }
+                            isLoading = false
+                        }
+                        
+                    }, label: {
+                        Image(systemName: "arrow.trianglehead.2.clockwise")
+                    })
+                    .disabled(isLoading)
+                }
+            }
+            .navigationDestination(for: StockWinningRate.self) { info in
+                YuutaiAnticipationView(
+                    code: .constant(info.code),
+                    purchaseDate: $purchaseDate,
+                    saleDate: $saleDate
+                )
+            }
+            .navigationTitle(verificationRange)
+            .task {
+                // 個別の検証から戻った時に通信が走ってしまうので弾く
+                if stockDisplayWinningRate.isEmpty {
+                    let startTimer = Date()
+                    isLoading = true
+                    
+                    tanosiiYuutaiInfo = await getYuutaiCodeList()
+                    
+                    let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
+                        $0.winningRate > $1.winningRate
+                    }
+                    stockDisplayWinningRate = value
+                    isLoading = false
+                    print("処理時間: \(Date().timeIntervalSince(startTimer))秒")
+                }
+            }
+    }
+    
+    private func stableView() -> some View {
         VStack {
             HStack {
                 let count = tanosiiYuutaiInfo.count == 0 ? "--" : tanosiiYuutaiInfo.count.description
                 Text("\(month.ja)優待 \(count)銘柄")
                 
                 Spacer()
+                
+            }
+            .padding(.horizontal)
+            
+            HStack {
+                Text("勝ち条件")
+                Picker("勝利条件", selection: $selectedWinParcent) {
+                    ForEach(0...10, id: \.self) { number in
+                        Text("\(number)").tag(number)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(width: 80, height: 50)
+                
+                Text("%")
+                
+                Spacer()
+                
                 Text("検証")
                 Picker("数字を選択", selection: $selectedYear) {
-                                ForEach(5...20, id: \.self) { number in
-                                    Text("\(number)").tag(number)
-                                }
-                            }
-                            .pickerStyle(.wheel)
-                            .frame(width: 100, height: 50)
+                    ForEach(5...20, id: \.self) { number in
+                        Text("\(number)").tag(number)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(width: 80, height: 50)
                 Text("年")
             }
             .padding(.horizontal)
@@ -64,254 +135,124 @@ struct YuutaiMonthWinningRateListScreen: View {
             }
             .padding(.horizontal)
             
-            if isLoading {
-                Spacer()
-                ProgressView()
-                Spacer()
-            } else {
-                List(stockDisplayWinningRate) { info in
-                    NavigationLink(value: info) {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(info.name).lineLimit(1)
-                                Text(info.code)
-                            }
-                            
-                            Spacer()
-                            
-                            VStack(alignment: .leading) {
-                                if let creditType = info.creditType {
-                                    Text(creditType)
-                                }
-                                Text("検証回数: \(info.totalCount)回")
-                            }
-                            
-                            Text(String(format: "%.1f%%", info.winningRate))
-                                .foregroundColor(info.winningRate >= 50 ? .red : .blue)
+            List(stockDisplayWinningRate) { info in
+                NavigationLink(value: info) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(info.name).lineLimit(1)
+                            Text(info.code)
                         }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .leading) {
+                            if let creditType = info.creditType {
+                                Text(creditType)
+                            }
+                            Text("検証回数: \(info.totalCount)回")
+                        }
+                        
+                        Text(String(format: "%.1f%%", info.winningRate))
+                            .foregroundColor(info.winningRate >= 50 ? .red : .blue)
                     }
                 }
-            }
-        }
-        .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = true
-        }
-        .onDisappear {
-            UIApplication.shared.isIdleTimerDisabled = false
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button (action: {
-                    Task {
-                        isLoading = true
-                        stockDisplayWinningRate = await fetchChartData(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
-                            $0.winningRate > $1.winningRate
-                        }
-                        isLoading = false
-                    }
-                    
-                }, label: {
-                    Image(systemName: "arrow.trianglehead.2.clockwise")
-                })
-                .disabled(isLoading)
-            }
-        }
-        .navigationDestination(for: StockWinningRate.self) { info in
-            YuutaiAnticipationView(
-                code: .constant(info.code),
-                purchaseDate: $purchaseDate,
-                saleDate: $saleDate
-            )
-        }
-        .navigationTitle(verificationRange)
-        .task {
-            // 個別の検証から戻った時に通信が走ってしまうので弾く
-            if stockDisplayWinningRate.isEmpty {
-                isLoading = true
-                
-                tanosiiYuutaiInfo = await getYuutaiCodeList()
-                
-                stockDisplayWinningRate = await fetchChartData(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
-                    $0.winningRate > $1.winningRate
-                }
-                isLoading = false
             }
         }
     }
     
     @MainActor
-    private func fetchChartData(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
-        let descriptor = FetchDescriptor<StockWinningRate>(
-            sortBy: [SortDescriptor(\.winningRate, order: .reverse)]
-        )
-
+    private func fetchStockWinningRate(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
+        let descriptor = FetchDescriptor<YuutaiSakimawariChartModel>()
+        
         let allData = try? context.fetch(descriptor)
         let cacheData = allData?.filter { $0.month == month }
-
+        
+        var stockWinningRate: [StockWinningRate] = []
+        
         if let cacheData, !cacheData.isEmpty {
             // 新しい日付でデータを更新
-            var newWinningData: [StockWinningRate] = []
+            
             for item in cacheData {
                 let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
-                let result = StockWinningRate(
-                    month: month, yuutaiInfo: .init(name: item.name, code: item.code, creditType: item.creditType),
-                    stockChartData: item.stockChartData,
-                    winningRate: winningRate,
-                    totalCount: trialCount
-                )
-                newWinningData.append(result)
+                let result = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
+                stockWinningRate.append(result)
             }
-
-            return newWinningData
+            
+            return stockWinningRate
         }
-
-        let newData = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
-        newData.forEach { context.insert($0) }
-
-        return newData
+        
+        let newData = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo, month: month)
+        for item in newData {
+            let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
+            let result = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
+            stockWinningRate.append(result)
+        }
+        
+        // SwiftDataにデータを保存
+        stockWinningRate.forEach {
+            context
+                .insert(
+                    YuutaiSakimawariChartModel(
+                        month: $0.month,
+                        name: $0.name,
+                        code: $0.code,
+                        creditType: $0.creditType,
+                        stockChartData: $0.stockChartData
+                    )
+                )
+        }
+        
+        return stockWinningRate
     }
     
     private func getYuutaiCodeList() async -> [TanosiiYuutaiInfo] {
-        switch month {
-        case .january:
-            if let cache = UserStore.january {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.january = infoData
-                return infoData
-            }
-
-        case .february:
-            if let cache = UserStore.february {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.february = infoData
-                return infoData
-            }
-            
-        case .march:
-            if let cache = UserStore.march {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.march = infoData
-                return infoData
-            }
-            
-        case .april:
-            if let cache = UserStore.april {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.april = infoData
-                return infoData
-            }
-            
-        case .may:
-            if let cache = UserStore.may {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.may = infoData
-                return infoData
-            }
-            
-        case .june:
-            if let cache = UserStore.june {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.june = infoData
-                return infoData
-            }
-            
-        case .july:
-            if let cache = UserStore.july {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.july = infoData
-                return infoData
-            }
-            
-        case .august:
-            if let cache = UserStore.august {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.august = infoData
-                return infoData
-            }
-            
-        case .september:
-            if let cache = UserStore.september {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.september = infoData
-                return infoData
-            }
-            
-        case .october:
-            if let cache = UserStore.october {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.october = infoData
-                return infoData
-            }
-            
-        case .november:
-            if let cache = UserStore.november {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.november = infoData
-                return infoData
-            }
-            
-        case .december:
-            if let cache = UserStore.december {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.december = infoData
-                return infoData
-            }
-            
+        if let cache = month.tanosiiYuutaiInfo {
+            return cache
+        } else {
+            let infoData = await fetchStockInfo()
+            UserStore.setYuutaiInfo(infoData, for: month)
+            return infoData
         }
     }
 }
 
 // 銘柄の購入日から売却日までの勝率を取得
 private extension YuutaiMonthWinningRateListScreen {
-    func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
-        await withTaskGroup(of: StockWinningRate?.self, returning: [StockWinningRate].self) { group in
-            let start = Date()
+    struct FetchStockAllInfoModel {
+        let info: TanosiiYuutaiInfo
+        let chartData: [MyStockChartData]
+    }
+    
+    func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo], month: YuutaiMonth) async -> [YuutaiSakimawariChartModel] {
+        let value: [FetchStockAllInfoModel] = await withTaskGroup(of: FetchStockAllInfoModel?.self, returning: [FetchStockAllInfoModel].self) { group in
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM/dd"
+            // 存在しないデータはスキップされるのでかなり昔から取得
+            let start = dateFormatter.date(from: "1980/1/3")!
+            
             for item in stockInfo {
                 group.addTask {
-                    if let winningRate = await fetchWinningRateAndTrialCount(for: item.code) {
-                        return await StockWinningRate(month: month, yuutaiInfo: item, stockChartData: winningRate.0, winningRate: winningRate.1, totalCount: winningRate.2)
-                    } else {
+                    let result = await YahooYFinanceAPIService().fetchStockChartData(code: item.code, startDate: start, endDate: Date())
+                    switch result {
+                    case .success(let stockChartData):
+                        return FetchStockAllInfoModel(info: item, chartData: stockChartData)
+                    case .failure(_):
                         return nil
                     }
                 }
             }
             
-            var results = [StockWinningRate]()
+            var results = [FetchStockAllInfoModel]()
             for await maybeInfo in group {
                 if let info = maybeInfo {
                     results.append(info)
                 }
             }
-            let end = Date()
-            let timeInterval = end.timeIntervalSince(start)
-            print("処理時間: \(timeInterval)秒")
             
             return results
         }
+        
+        return value.compactMap{ YuutaiSakimawariChartModel(month: month, yuutaiInfo: $0.info, stockChartData: $0.chartData) }
     }
     
     func fetchWinningRateAndTrialCount(for code: String) async -> ([MyStockChartData], Float, Int)? {
@@ -347,7 +288,7 @@ private extension YuutaiMonthWinningRateListScreen {
         }
         
         let pairs = await YuutaiUtil.fetchStockPrice(stockChartData: verificationPeriod, purchaseDay: purchaseDate, saleDay: saleDate)
-        return (YuutaiUtil.riseRateString(for: pairs), YuutaiUtil.trialCount(for: pairs))
+        return (YuutaiUtil.riseRateString(for: pairs, parcent: Float(selectedWinParcent)), YuutaiUtil.trialCount(for: pairs))
     }
 }
 
@@ -408,7 +349,7 @@ private extension YuutaiMonthWinningRateListScreen {
                 
                 let code: String
                 let range = NSRange(fullText.startIndex..., in: fullText)
-
+                
                 if let match = regex.firstMatch(in: fullText, range: range),
                    let codeRange = Range(match.range(at: 1), in: fullText) {
                     code = String(fullText[codeRange])
