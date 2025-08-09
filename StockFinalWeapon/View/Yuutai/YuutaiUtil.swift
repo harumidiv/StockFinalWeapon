@@ -6,11 +6,11 @@ struct YuutaiUtil {
     /// 勝率を数値で返却する
     /// - Parameter data: 比較するデータ
     /// - Returns: 勝率
-    static func riseRateString(for data: [StockChartPairData]) -> Float {
+    static func riseRateString(for data: [StockChartPairData], parcent: Float) -> Float {
         let valid = data.compactMap { $0.valueChangeParcent }
         guard !valid.isEmpty else { return 0 }
         
-        let rising = valid.filter { $0 > 0 }.count
+        let rising = valid.filter { $0 > parcent }.count
         let percent = Float(rising) / Float(valid.count) * 100
         
         return percent

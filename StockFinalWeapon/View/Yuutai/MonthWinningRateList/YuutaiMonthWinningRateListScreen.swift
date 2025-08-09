@@ -21,6 +21,7 @@ struct YuutaiMonthWinningRateListScreen: View {
     @State private var selectedStock: YuutaiSakimawariChartModel? = nil
     @State private var isLoading: Bool = true
     @State private var selectedYear: Int = 10
+    @State private var selectedWinParcent: Int = 0
     
     private let baseURL = "https://www.kabuyutai.com/yutai/"
     @Binding var purchaseDate: Date
@@ -42,6 +43,24 @@ struct YuutaiMonthWinningRateListScreen: View {
                 Text("\(month.ja)優待 \(count)銘柄")
                 
                 Spacer()
+                
+            }
+            .padding(.horizontal)
+            
+            HStack {
+                Text("勝ち条件")
+                Picker("勝利条件", selection: $selectedWinParcent) {
+                    ForEach(0...10, id: \.self) { number in
+                        Text("\(number)").tag(number)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(width: 80, height: 50)
+                
+                Text("%")
+                
+                Spacer()
+                
                 Text("検証")
                 Picker("数字を選択", selection: $selectedYear) {
                     ForEach(5...20, id: \.self) { number in
@@ -49,7 +68,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                     }
                 }
                 .pickerStyle(.wheel)
-                .frame(width: 100, height: 50)
+                .frame(width: 80, height: 50)
                 Text("年")
             }
             .padding(.horizontal)
@@ -116,7 +135,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                 .disabled(isLoading)
             }
         }
-        .navigationDestination(for: YuutaiSakimawariChartModel.self) { info in
+        .navigationDestination(for: StockWinningRate.self) { info in
             YuutaiAnticipationView(
                 code: .constant(info.code),
                 purchaseDate: $purchaseDate,
@@ -270,7 +289,7 @@ private extension YuutaiMonthWinningRateListScreen {
         }
         
         let pairs = await YuutaiUtil.fetchStockPrice(stockChartData: verificationPeriod, purchaseDay: purchaseDate, saleDay: saleDate)
-        return (YuutaiUtil.riseRateString(for: pairs), YuutaiUtil.trialCount(for: pairs))
+        return (YuutaiUtil.riseRateString(for: pairs, parcent: Float(selectedWinParcent)), YuutaiUtil.trialCount(for: pairs))
     }
 }
 
