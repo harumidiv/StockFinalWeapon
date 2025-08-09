@@ -11,8 +11,8 @@ import SwiftYFinance
 struct StockChartPairData: Identifiable {
     var id = UUID()
     
-    let purchase: StockChartData?
-    let sale: StockChartData?
+    let purchase: MyStockChartData?
+    let sale: MyStockChartData?
     
     // 購入日から売却日までの最大値
     var highestPrice: Float?

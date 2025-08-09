@@ -167,17 +167,9 @@ extension ScreeningScreen {
         var stocks: [ScrapingIPOData] = .init()
         var processed = 0
         for stock in ipoData {
-            do {
-                // `SwiftYFinance.chartDataBy`を非同期呼び出しに変換
-                let data = try await SwiftYFinanceHelper.fetchChartData(
-                    identifier: "\(stock.code).T",
-                    start: stock.startDate,
-                    end: Date()
-                )
-                
-                ////////////////高値確認
-                /// 📝adjclose: 調整後終値,株式分割を考慮した終値
-                
+            let result = await YahooYFinanceAPIService().fetchStockChartData(code: stock.code, startDate: stock.startDate, endDate: Date())
+            switch result {
+            case .success(let data):
                 // 初日終値
                 let firstValue: Float = data.first?.adjclose ?? 0
                 
@@ -186,20 +178,23 @@ extension ScreeningScreen {
                 
                 let parcent = (todayValue - firstValue) / firstValue * 100
                 
-                
                 if parcent > priceRizeParcentage {
-                    await stocks.append(
-                        .init(
-                            code: stock.code,
-                            overview: try scrapingCompanyOverview(code: stock.code),
-                            per: try scrapingCompanyPER(code: stock.code),
-                            percentChange: parcent,
-                            link: "https://finance.yahoo.co.jp/quote/\(stock.code).T"
+                    do {
+                        await stocks.append(
+                            .init(
+                                code: stock.code,
+                                overview: try scrapingCompanyOverview(code: stock.code),
+                                per: try scrapingCompanyPER(code: stock.code),
+                                percentChange: parcent,
+                                link: "https://finance.yahoo.co.jp/quote/\(stock.code).T"
+                            )
                         )
-                    )
+                    } catch {
+                        print("scraping エラー: \(error.localizedDescription)")
+                    }
                 }
                 
-            } catch {
+            case .failure(let error):
                 print("エラー: \(error.localizedDescription)")
             }
             
@@ -233,7 +228,6 @@ extension ScreeningScreen {
         }
     }
     
-    
     /// PERのスクレイピング
     /// - Parameter code:対象企業のコード
     /// - Returns: PER
@@ -249,66 +243,6 @@ extension ScreeningScreen {
         } else {
             return nil
         }
-    }
-    
-    /// IPO銘柄の情報を解析する
-    /// - Parameter ipoData: iPO銘柄のデータ
-    /// - Returns: 株価の情報
-    func fetchStock(ipoData: [StockIPOData]) async -> [[String]] {
-        var count = 0
-        
-        var stocks: [[String]] = .init()
-        for stock in ipoData {
-            do {
-                // `SwiftYFinance.chartDataBy`を非同期呼び出しに変換
-                let data = try await SwiftYFinanceHelper.fetchChartData(
-                    identifier: "\(stock.code).T",
-                    start: stock.startDate,
-                    end: Date()
-                )
-                
-                
-                ////////////////高値確認
-                /// 📝adjclose: 調整後終値,株式分割を考慮した終値
-                
-                // 初日終値
-                let firstValue: Float = data.first?.adjclose ?? 0
-                
-                // 今日の終値
-                let todayValue: Float = data.last?.adjclose ?? 0
-                
-                let parcent = (todayValue - firstValue) / firstValue * 100
-                
-                
-                if parcent > 0 {
-                    count += 1
-                }
-                
-                ////////////////
-                
-                
-                // データを加工
-                let value: [[String]] = data.compactMap {
-                    guard let date = $0.date,
-                          let open = $0.open,
-                          let close = $0.close,
-                          let high = $0.high,
-                          let low = $0.low else {
-                        return []
-                    }
-                    return [date.description, open.description, close.description, high.description, low.description]
-                }
-                
-                var resultValue = value.flatMap { $0 }
-                resultValue.insert(stock.market.rawValue, at: 0)
-                resultValue.insert(stock.code, at: 0)
-                stocks.append(resultValue)
-            } catch {
-                print("エラー: \(error.localizedDescription)")
-            }
-        }
-        
-        return stocks
     }
 }
 

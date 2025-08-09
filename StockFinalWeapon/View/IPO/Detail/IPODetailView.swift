@@ -113,20 +113,15 @@ extension IPODetailScreen {
         var stocks: [ScrapingIPOData] = .init()
         var processed = 0
         for code in codes {
-            do {
-                
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy/MM/dd"
-                // IPO銘柄のデータが2011年からしかないので決め打ち
-                let start = dateFormatter.date(from: "2011/1/3")!
-                
-                // `SwiftYFinance.chartDataBy`を非同期呼び出しに変換
-                let data = try await SwiftYFinanceHelper.fetchChartData(
-                    identifier: "\(code).T",
-                    start: start,
-                    end: Date()
-                )
-                
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM/dd"
+            // IPO銘柄のデータが2011年からしかないので決め打ち
+            let start = dateFormatter.date(from: "2011/1/3")!
+            
+            let result = await YahooYFinanceAPIService().fetchStockChartData(code: code, startDate: start, endDate: Date())
+            
+            switch result {
+            case .success(let data):
                 ////////////////高値確認
                 /// 📝adjclose: 調整後終値,株式分割を考慮した終値
                 
@@ -141,32 +136,24 @@ extension IPODetailScreen {
                 switch comparison {
                 case .greaterThanOrEqual where parcent > priceOverParcentage,
                      .lessThanOrEqual where parcent < priceOverParcentage:
-                    await stocks.append(
-                        .init(
-                            code: code,
-                            overview: try scrapingCompanyOverview(code: code),
-                            per: try scrapingCompanyPER(code: code),
-                            percentChange: parcent,
-                            link: "https://finance.yahoo.co.jp/quote/\(code).T"
+                    do {
+                        await stocks.append(
+                            .init(
+                                code: code,
+                                overview: try scrapingCompanyOverview(code: code),
+                                per: try scrapingCompanyPER(code: code),
+                                percentChange: parcent,
+                                link: "https://finance.yahoo.co.jp/quote/\(code).T"
+                            )
                         )
-                    )
+                    } catch {
+                        print("Scraping エラー: ")
+                    }
                 default: break
                 }
-                
-//                if parcent > priceOverParcentage {
-//                    await stocks.append(
-//                        .init(
-//                            code: code,
-//                            overview: try scrapingCompanyOverview(code: code),
-//                            per: try scrapingCompanyPER(code: code),
-//                            percentChange: parcent,
-//                            link: "https://finance.yahoo.co.jp/quote/\(code).T"
-//                        )
-//                    )
-//                }
-                
-            } catch {
-                print("エラー: \(error.localizedDescription)")
+
+            case .failure(let error):
+                print("SwiftYFinance エラー: \(error.localizedDescription)")
             }
             
             processed += 1

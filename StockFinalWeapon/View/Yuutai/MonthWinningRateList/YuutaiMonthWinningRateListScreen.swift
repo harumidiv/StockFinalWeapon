@@ -8,53 +8,17 @@
 import SwiftUI
 import SwiftSoup
 import SwiftYFinance
-
-struct TanosiiYuutaiInfo: Codable {
-    let name: String
-    let code: String
-    let creditType: String?
-}
-
-struct StockWinningRate: Identifiable, Hashable {
-    let id = UUID()
-    let name: String
-    let code: String
-    let creditType: String?
-    let stockChartData: [StockChartData]
-    
-    let winningRate: Float
-    let totalCount: Int
-    
-    init(yuutaiInfo: TanosiiYuutaiInfo, stockChartData: [StockChartData], winningRate: Float, totalCount: Int) {
-        self.name = yuutaiInfo.name
-        self.code = yuutaiInfo.code
-        self.creditType = yuutaiInfo.creditType
-        self.stockChartData = stockChartData
-        self.winningRate = winningRate
-        self.totalCount = totalCount
-    }
-    
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(name)
-        hasher.combine(code)
-        hasher.combine(creditType)
-    }
-    
-    static func == (lhs: StockWinningRate, rhs: StockWinningRate) -> Bool {
-        return lhs.id == rhs.id &&
-        lhs.name == rhs.name &&
-        lhs.code == rhs.code &&
-        lhs.creditType == rhs.creditType
-    }
-}
+import SwiftData
 
 struct YuutaiMonthWinningRateListScreen: View {
     // 特定月の銘柄リスト
     @State private var tanosiiYuutaiInfo: [TanosiiYuutaiInfo] = []
     
-    @State private var selectedStock: StockWinningRate? = nil
+    @Environment(\.modelContext) private var context
+    
     @State private var stockDisplayWinningRate: [StockWinningRate] = []
+    
+    @State private var selectedStock: StockWinningRate? = nil
     @State private var isLoading: Bool = true
     @State private var selectedYear: Int = 10
     
@@ -140,19 +104,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                 Button (action: {
                     Task {
                         isLoading = true
-                        var newData: [StockWinningRate] = []
-
-                        for item in stockDisplayWinningRate {
-                            let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
-                            let result = StockWinningRate(
-                                yuutaiInfo: .init(name: item.name, code: item.code, creditType: item.creditType),
-                                stockChartData: item.stockChartData,
-                                winningRate: winningRate,
-                                totalCount: trialCount
-                            )
-                            newData.append(result)
-                        }
-                        stockDisplayWinningRate = newData.sorted {
+                        stockDisplayWinningRate = await fetchChartData(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
                             $0.winningRate > $1.winningRate
                         }
                         isLoading = false
@@ -179,13 +131,44 @@ struct YuutaiMonthWinningRateListScreen: View {
                 
                 tanosiiYuutaiInfo = await getYuutaiCodeList()
                 
-                let infoList = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
-                stockDisplayWinningRate = infoList.sorted {
+                stockDisplayWinningRate = await fetchChartData(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
                     $0.winningRate > $1.winningRate
                 }
                 isLoading = false
             }
         }
+    }
+    
+    @MainActor
+    private func fetchChartData(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
+        let descriptor = FetchDescriptor<StockWinningRate>(
+            sortBy: [SortDescriptor(\.winningRate, order: .reverse)]
+        )
+
+        let allData = try? context.fetch(descriptor)
+        let cacheData = allData?.filter { $0.month == month }
+
+        if let cacheData, !cacheData.isEmpty {
+            // 新しい日付でデータを更新
+            var newWinningData: [StockWinningRate] = []
+            for item in cacheData {
+                let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
+                let result = StockWinningRate(
+                    month: month, yuutaiInfo: .init(name: item.name, code: item.code, creditType: item.creditType),
+                    stockChartData: item.stockChartData,
+                    winningRate: winningRate,
+                    totalCount: trialCount
+                )
+                newWinningData.append(result)
+            }
+
+            return newWinningData
+        }
+
+        let newData = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
+        newData.forEach { context.insert($0) }
+
+        return newData
     }
     
     private func getYuutaiCodeList() async -> [TanosiiYuutaiInfo] {
@@ -310,7 +293,7 @@ private extension YuutaiMonthWinningRateListScreen {
             for item in stockInfo {
                 group.addTask {
                     if let winningRate = await fetchWinningRateAndTrialCount(for: item.code) {
-                        return await StockWinningRate(yuutaiInfo: item, stockChartData: winningRate.0, winningRate: winningRate.1, totalCount: winningRate.2)
+                        return await StockWinningRate(month: month, yuutaiInfo: item, stockChartData: winningRate.0, winningRate: winningRate.1, totalCount: winningRate.2)
                     } else {
                         return nil
                     }
@@ -331,8 +314,13 @@ private extension YuutaiMonthWinningRateListScreen {
         }
     }
     
-    func fetchWinningRateAndTrialCount(for code: String) async -> ([StockChartData], Float, Int)? {
-        let result = await YuutaiUtil.fetchStockData(code: code)
+    func fetchWinningRateAndTrialCount(for code: String) async -> ([MyStockChartData], Float, Int)? {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM/dd"
+        // 存在しないデータはスキップされるのでかなり昔から取得
+        let start = dateFormatter.date(from: "1980/1/3")!
+        
+        let result = await YahooYFinanceAPIService().fetchStockChartData(code: code, startDate: start, endDate: Date())
         switch result {
         case .success(let stockChartData):
             let winningRateAndTrialCount = await calculateWinnigRate(chartData: stockChartData)
@@ -343,7 +331,7 @@ private extension YuutaiMonthWinningRateListScreen {
         }
     }
     
-    func calculateWinnigRate(chartData: [StockChartData]) async -> (Float, Int) {
+    func calculateWinnigRate(chartData: [MyStockChartData]) async -> (Float, Int) {
         let calendar = Calendar.current
         let today = Date()
         let tenYearsAgoYear = calendar.component(.year, from: today) - selectedYear
@@ -372,9 +360,9 @@ private extension YuutaiMonthWinningRateListScreen {
         while true {
             let urlString: String
             if page == 1 {
-                urlString = baseURL + month.en + ".html"
+                urlString = baseURL + month.rawValue + ".html"
             } else {
-                urlString = baseURL + month.en + "\(page).html"
+                urlString = baseURL + month.rawValue + "\(page).html"
             }
             
             do {
