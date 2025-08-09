@@ -11,11 +11,9 @@ import SwiftYFinance
 import SwiftData
 
 struct YuutaiMonthWinningRateListScreen: View {
-    // 特定月の銘柄リスト
-    @State private var tanosiiYuutaiInfo: [TanosiiYuutaiInfo] = []
-    
     @Environment(\.modelContext) private var context
     
+    @State private var tanosiiYuutaiInfo: [TanosiiYuutaiInfo] = []
     @State private var stockDisplayWinningRate: [StockWinningRate] = []
     
     @State private var selectedStock: YuutaiSakimawariChartModel? = nil
@@ -115,7 +113,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                 
                 Text("検証")
                 Picker("数字を選択", selection: $selectedYear) {
-                    ForEach(5...20, id: \.self) { number in
+                    ForEach(3...10, id: \.self) { number in
                         Text("\(number)").tag(number)
                     }
                 }
@@ -190,6 +188,7 @@ struct YuutaiMonthWinningRateListScreen: View {
         
         // SwiftDataにデータを保存
         stockWinningRate.forEach {
+            // TODO: ここで重複していない場合は追加にしたい
             context
                 .insert(
                     YuutaiSakimawariChartModel(
@@ -225,10 +224,9 @@ private extension YuutaiMonthWinningRateListScreen {
     
     func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo], month: YuutaiMonth) async -> [YuutaiSakimawariChartModel] {
         let value: [FetchStockAllInfoModel] = await withTaskGroup(of: FetchStockAllInfoModel?.self, returning: [FetchStockAllInfoModel].self) { group in
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyy/MM/dd"
-            // 存在しないデータはスキップされるのでかなり昔から取得
-            let start = dateFormatter.date(from: "1980/1/3")!
+            let calendar = Calendar.current
+            let year = calendar.component(.year, from: Date()) - 11
+            let start = calendar.date(from: DateComponents(year: year, month: 1, day: 3))!
             
             for item in stockInfo {
                 group.addTask {
