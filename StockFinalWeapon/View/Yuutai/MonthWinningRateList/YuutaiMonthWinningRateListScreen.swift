@@ -16,9 +16,9 @@ struct YuutaiMonthWinningRateListScreen: View {
     
     @Environment(\.modelContext) private var context
     
-    @State private var stockDisplayWinningRate: [StockWinningRate] = []
+    @State private var stockDisplayWinningRate: [YuutaiSakimawariChartModel] = []
     
-    @State private var selectedStock: StockWinningRate? = nil
+    @State private var selectedStock: YuutaiSakimawariChartModel? = nil
     @State private var isLoading: Bool = true
     @State private var selectedYear: Int = 10
     
@@ -116,7 +116,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                 .disabled(isLoading)
             }
         }
-        .navigationDestination(for: StockWinningRate.self) { info in
+        .navigationDestination(for: YuutaiSakimawariChartModel.self) { info in
             YuutaiAnticipationView(
                 code: .constant(info.code),
                 purchaseDate: $purchaseDate,
@@ -140,8 +140,8 @@ struct YuutaiMonthWinningRateListScreen: View {
     }
     
     @MainActor
-    private func fetchChartData(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
-        let descriptor = FetchDescriptor<StockWinningRate>(
+    private func fetchChartData(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [YuutaiSakimawariChartModel] {
+        let descriptor = FetchDescriptor<YuutaiSakimawariChartModel>(
             sortBy: [SortDescriptor(\.winningRate, order: .reverse)]
         )
 
@@ -150,10 +150,10 @@ struct YuutaiMonthWinningRateListScreen: View {
 
         if let cacheData, !cacheData.isEmpty {
             // 新しい日付でデータを更新
-            var newWinningData: [StockWinningRate] = []
+            var newWinningData: [YuutaiSakimawariChartModel] = []
             for item in cacheData {
                 let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
-                let result = StockWinningRate(
+                let result = YuutaiSakimawariChartModel(
                     month: month, yuutaiInfo: .init(name: item.name, code: item.code, creditType: item.creditType),
                     stockChartData: item.stockChartData,
                     winningRate: winningRate,
@@ -287,20 +287,20 @@ struct YuutaiMonthWinningRateListScreen: View {
 
 // 銘柄の購入日から売却日までの勝率を取得
 private extension YuutaiMonthWinningRateListScreen {
-    func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
-        await withTaskGroup(of: StockWinningRate?.self, returning: [StockWinningRate].self) { group in
+    func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo]) async -> [YuutaiSakimawariChartModel] {
+        await withTaskGroup(of: YuutaiSakimawariChartModel?.self, returning: [YuutaiSakimawariChartModel].self) { group in
             let start = Date()
             for item in stockInfo {
                 group.addTask {
                     if let winningRate = await fetchWinningRateAndTrialCount(for: item.code) {
-                        return await StockWinningRate(month: month, yuutaiInfo: item, stockChartData: winningRate.0, winningRate: winningRate.1, totalCount: winningRate.2)
+                        return await YuutaiSakimawariChartModel(month: month, yuutaiInfo: item, stockChartData: winningRate.0, winningRate: winningRate.1, totalCount: winningRate.2)
                     } else {
                         return nil
                     }
                 }
             }
             
-            var results = [StockWinningRate]()
+            var results = [YuutaiSakimawariChartModel]()
             for await maybeInfo in group {
                 if let info = maybeInfo {
                     results.append(info)

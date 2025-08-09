@@ -13,7 +13,7 @@ struct StockFinalWeaponApp: App {
     var body: some Scene {
         WindowGroup {
             HomeTabView()
-                .modelContainer(for: StockWinningRate.self)
+                .modelContainer(for: YuutaiSakimawariChartModel.self)
         }
     }
 }
