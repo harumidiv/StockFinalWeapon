@@ -16,7 +16,7 @@ struct YuutaiMonthWinningRateListScreen: View {
     
     @Environment(\.modelContext) private var context
     
-    @State private var stockDisplayWinningRate: [YuutaiSakimawariChartModel] = []
+    @State private var stockDisplayWinningRate: [StockWinningRate] = []
     
     @State private var selectedStock: YuutaiSakimawariChartModel? = nil
     @State private var isLoading: Bool = true
@@ -44,12 +44,12 @@ struct YuutaiMonthWinningRateListScreen: View {
                 Spacer()
                 Text("検証")
                 Picker("数字を選択", selection: $selectedYear) {
-                                ForEach(5...20, id: \.self) { number in
-                                    Text("\(number)").tag(number)
-                                }
-                            }
-                            .pickerStyle(.wheel)
-                            .frame(width: 100, height: 50)
+                    ForEach(5...20, id: \.self) { number in
+                        Text("\(number)").tag(number)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(width: 100, height: 50)
                 Text("年")
             }
             .padding(.horizontal)
@@ -104,7 +104,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                 Button (action: {
                     Task {
                         isLoading = true
-                        stockDisplayWinningRate = await fetchChartData(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
+                        stockDisplayWinningRate = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
                             $0.winningRate > $1.winningRate
                         }
                         isLoading = false
@@ -131,44 +131,62 @@ struct YuutaiMonthWinningRateListScreen: View {
                 
                 tanosiiYuutaiInfo = await getYuutaiCodeList()
                 
-                stockDisplayWinningRate = await fetchChartData(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
+                let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
                     $0.winningRate > $1.winningRate
                 }
+                print("value: \(value.count)")
+                stockDisplayWinningRate = value
                 isLoading = false
             }
         }
     }
     
     @MainActor
-    private func fetchChartData(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [YuutaiSakimawariChartModel] {
-        let descriptor = FetchDescriptor<YuutaiSakimawariChartModel>(
-            sortBy: [SortDescriptor(\.winningRate, order: .reverse)]
-        )
-
+    private func fetchStockWinningRate(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
+        let descriptor = FetchDescriptor<YuutaiSakimawariChartModel>()
+        
         let allData = try? context.fetch(descriptor)
         let cacheData = allData?.filter { $0.month == month }
-
+        
+        var stockWinningRate: [StockWinningRate] = []
+    
         if let cacheData, !cacheData.isEmpty {
             // 新しい日付でデータを更新
-            var newWinningData: [YuutaiSakimawariChartModel] = []
+            
             for item in cacheData {
                 let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
-                let result = YuutaiSakimawariChartModel(
-                    month: month, yuutaiInfo: .init(name: item.name, code: item.code, creditType: item.creditType),
-                    stockChartData: item.stockChartData,
-                    winningRate: winningRate,
-                    totalCount: trialCount
-                )
-                newWinningData.append(result)
+                let result = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
+                stockWinningRate.append(result)
             }
-
-            return newWinningData
+            
+            return stockWinningRate
+        }
+        
+        let newData = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo, month: month)
+        print("count:1 \(newData.count)")
+        for item in newData {
+            let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
+            let result = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
+            stockWinningRate.append(result)
+        }
+        
+        print("count: \(stockWinningRate.count)")
+        
+        // SwiftDataにデータを保存
+        stockWinningRate.forEach {
+            context
+                .insert(
+                    YuutaiSakimawariChartModel(
+                        month: $0.month,
+                        name: $0.name,
+                        code: $0.code,
+                        creditType: $0.creditType,
+                        stockChartData: $0.stockChartData
+                    )
+                )
         }
 
-        let newData = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo)
-        newData.forEach { context.insert($0) }
-
-        return newData
+        return stockWinningRate
     }
     
     private func getYuutaiCodeList() async -> [TanosiiYuutaiInfo] {
@@ -181,7 +199,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                 UserStore.january = infoData
                 return infoData
             }
-
+            
         case .february:
             if let cache = UserStore.february {
                 return cache
@@ -287,14 +305,20 @@ struct YuutaiMonthWinningRateListScreen: View {
 
 // 銘柄の購入日から売却日までの勝率を取得
 private extension YuutaiMonthWinningRateListScreen {
-    func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo]) async -> [YuutaiSakimawariChartModel] {
+    func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo], month: YuutaiMonth) async -> [YuutaiSakimawariChartModel] {
         await withTaskGroup(of: YuutaiSakimawariChartModel?.self, returning: [YuutaiSakimawariChartModel].self) { group in
-            let start = Date()
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM/dd"
+            // 存在しないデータはスキップされるのでかなり昔から取得
+            let start = dateFormatter.date(from: "1980/1/3")!
+
             for item in stockInfo {
                 group.addTask {
-                    if let winningRate = await fetchWinningRateAndTrialCount(for: item.code) {
-                        return await YuutaiSakimawariChartModel(month: month, yuutaiInfo: item, stockChartData: winningRate.0, winningRate: winningRate.1, totalCount: winningRate.2)
-                    } else {
+                    let result = await YahooYFinanceAPIService().fetchStockChartData(code: item.code, startDate: start, endDate: Date())
+                    switch result {
+                    case .success(let stockChartData):
+                        return await YuutaiSakimawariChartModel(month: month, yuutaiInfo: item, stockChartData: stockChartData)
+                    case .failure(_):
                         return nil
                     }
                 }
@@ -408,7 +432,7 @@ private extension YuutaiMonthWinningRateListScreen {
                 
                 let code: String
                 let range = NSRange(fullText.startIndex..., in: fullText)
-
+                
                 if let match = regex.firstMatch(in: fullText, range: range),
                    let codeRange = Range(match.range(at: 1), in: fullText) {
                     code = String(fullText[codeRange])
