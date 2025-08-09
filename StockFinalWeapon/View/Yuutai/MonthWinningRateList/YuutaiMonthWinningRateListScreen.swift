@@ -37,6 +37,58 @@ struct YuutaiMonthWinningRateListScreen: View {
     }
     
     var body: some View {
+        stableView()
+            .loading(isLoading)
+            .onAppear {
+                UIApplication.shared.isIdleTimerDisabled = true
+            }
+            .onDisappear {
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button (action: {
+                        Task {
+                            isLoading = true
+                            stockDisplayWinningRate = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
+                                $0.winningRate > $1.winningRate
+                            }
+                            isLoading = false
+                        }
+                        
+                    }, label: {
+                        Image(systemName: "arrow.trianglehead.2.clockwise")
+                    })
+                    .disabled(isLoading)
+                }
+            }
+            .navigationDestination(for: StockWinningRate.self) { info in
+                YuutaiAnticipationView(
+                    code: .constant(info.code),
+                    purchaseDate: $purchaseDate,
+                    saleDate: $saleDate
+                )
+            }
+            .navigationTitle(verificationRange)
+            .task {
+                // 個別の検証から戻った時に通信が走ってしまうので弾く
+                if stockDisplayWinningRate.isEmpty {
+                    let startTimer = Date()
+                    isLoading = true
+                    
+                    tanosiiYuutaiInfo = await getYuutaiCodeList()
+                    
+                    let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
+                        $0.winningRate > $1.winningRate
+                    }
+                    stockDisplayWinningRate = value
+                    isLoading = false
+                    print("処理時間: \(Date().timeIntervalSince(startTimer))秒")
+                }
+            }
+    }
+    
+    private func stableView() -> some View {
         VStack {
             HStack {
                 let count = tanosiiYuutaiInfo.count == 0 ? "--" : tanosiiYuutaiInfo.count.description
@@ -83,80 +135,27 @@ struct YuutaiMonthWinningRateListScreen: View {
             }
             .padding(.horizontal)
             
-            if isLoading {
-                Spacer()
-                ProgressView()
-                Spacer()
-            } else {
-                List(stockDisplayWinningRate) { info in
-                    NavigationLink(value: info) {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(info.name).lineLimit(1)
-                                Text(info.code)
-                            }
-                            
-                            Spacer()
-                            
-                            VStack(alignment: .leading) {
-                                if let creditType = info.creditType {
-                                    Text(creditType)
-                                }
-                                Text("検証回数: \(info.totalCount)回")
-                            }
-                            
-                            Text(String(format: "%.1f%%", info.winningRate))
-                                .foregroundColor(info.winningRate >= 50 ? .red : .blue)
+            List(stockDisplayWinningRate) { info in
+                NavigationLink(value: info) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(info.name).lineLimit(1)
+                            Text(info.code)
                         }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .leading) {
+                            if let creditType = info.creditType {
+                                Text(creditType)
+                            }
+                            Text("検証回数: \(info.totalCount)回")
+                        }
+                        
+                        Text(String(format: "%.1f%%", info.winningRate))
+                            .foregroundColor(info.winningRate >= 50 ? .red : .blue)
                     }
                 }
-            }
-        }
-        .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = true
-        }
-        .onDisappear {
-            UIApplication.shared.isIdleTimerDisabled = false
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button (action: {
-                    Task {
-                        isLoading = true
-                        stockDisplayWinningRate = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
-                            $0.winningRate > $1.winningRate
-                        }
-                        isLoading = false
-                    }
-                    
-                }, label: {
-                    Image(systemName: "arrow.trianglehead.2.clockwise")
-                })
-                .disabled(isLoading)
-            }
-        }
-        .navigationDestination(for: StockWinningRate.self) { info in
-            YuutaiAnticipationView(
-                code: .constant(info.code),
-                purchaseDate: $purchaseDate,
-                saleDate: $saleDate
-            )
-        }
-        .navigationTitle(verificationRange)
-        .task {
-            // 個別の検証から戻った時に通信が走ってしまうので弾く
-            if stockDisplayWinningRate.isEmpty {
-                let startTimer = Date()
-                isLoading = true
-                
-                tanosiiYuutaiInfo = await getYuutaiCodeList()
-                
-                let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
-                    $0.winningRate > $1.winningRate
-                }
-                stockDisplayWinningRate = value
-                isLoading = false
-                print("処理時間: \(Date().timeIntervalSince(startTimer))秒")
             }
         }
     }
@@ -169,7 +168,7 @@ struct YuutaiMonthWinningRateListScreen: View {
         let cacheData = allData?.filter { $0.month == month }
         
         var stockWinningRate: [StockWinningRate] = []
-    
+        
         if let cacheData, !cacheData.isEmpty {
             // 新しい日付でデータを更新
             
@@ -202,7 +201,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                     )
                 )
         }
-
+        
         return stockWinningRate
     }
     
@@ -230,7 +229,7 @@ private extension YuutaiMonthWinningRateListScreen {
             dateFormatter.dateFormat = "yyyy/MM/dd"
             // 存在しないデータはスキップされるのでかなり昔から取得
             let start = dateFormatter.date(from: "1980/1/3")!
-
+            
             for item in stockInfo {
                 group.addTask {
                     let result = await YahooYFinanceAPIService().fetchStockChartData(code: item.code, startDate: start, endDate: Date())
