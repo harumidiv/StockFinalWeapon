@@ -134,7 +134,6 @@ struct YuutaiMonthWinningRateListScreen: View {
                 let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
                     $0.winningRate > $1.winningRate
                 }
-                print("value: \(value.count)")
                 stockDisplayWinningRate = value
                 isLoading = false
             }
@@ -163,14 +162,11 @@ struct YuutaiMonthWinningRateListScreen: View {
         }
         
         let newData = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo, month: month)
-        print("count:1 \(newData.count)")
         for item in newData {
             let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
             let result = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
             stockWinningRate.append(result)
         }
-        
-        print("count: \(stockWinningRate.count)")
         
         // SwiftDataにデータを保存
         stockWinningRate.forEach {
@@ -305,8 +301,13 @@ struct YuutaiMonthWinningRateListScreen: View {
 
 // 銘柄の購入日から売却日までの勝率を取得
 private extension YuutaiMonthWinningRateListScreen {
+    struct FetchStockAllInfoModel {
+        let info: TanosiiYuutaiInfo
+        let chartData: [MyStockChartData]
+    }
+    
     func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo], month: YuutaiMonth) async -> [YuutaiSakimawariChartModel] {
-        await withTaskGroup(of: YuutaiSakimawariChartModel?.self, returning: [YuutaiSakimawariChartModel].self) { group in
+        let value: [FetchStockAllInfoModel] = await withTaskGroup(of: FetchStockAllInfoModel?.self, returning: [FetchStockAllInfoModel].self) { group in
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy/MM/dd"
             // 存在しないデータはスキップされるのでかなり昔から取得
@@ -317,14 +318,14 @@ private extension YuutaiMonthWinningRateListScreen {
                     let result = await YahooYFinanceAPIService().fetchStockChartData(code: item.code, startDate: start, endDate: Date())
                     switch result {
                     case .success(let stockChartData):
-                        return await YuutaiSakimawariChartModel(month: month, yuutaiInfo: item, stockChartData: stockChartData)
+                        return FetchStockAllInfoModel(info: item, chartData: stockChartData)
                     case .failure(_):
                         return nil
                     }
                 }
             }
             
-            var results = [YuutaiSakimawariChartModel]()
+            var results = [FetchStockAllInfoModel]()
             for await maybeInfo in group {
                 if let info = maybeInfo {
                     results.append(info)
@@ -336,6 +337,8 @@ private extension YuutaiMonthWinningRateListScreen {
             
             return results
         }
+        
+        return value.compactMap{ YuutaiSakimawariChartModel(month: month, yuutaiInfo: $0.info, stockChartData: $0.chartData) }
     }
     
     func fetchWinningRateAndTrialCount(for code: String) async -> ([MyStockChartData], Float, Int)? {
