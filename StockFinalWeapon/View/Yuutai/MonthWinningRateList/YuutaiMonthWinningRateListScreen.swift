@@ -47,11 +47,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button (action: {
                         Task {
-                            isLoading = true
-                            stockDisplayWinningRate = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
-                                $0.winningRate > $1.winningRate
-                            }
-                            isLoading = false
+                            await reloadData()
                         }
                         
                     }, label: {
@@ -71,17 +67,7 @@ struct YuutaiMonthWinningRateListScreen: View {
             .task {
                 // 個別の検証から戻った時に通信が走ってしまうので弾く
                 if stockDisplayWinningRate.isEmpty {
-                    let startTimer = Date()
-                    isLoading = true
-                    
-                    tanosiiYuutaiInfo = await getYuutaiCodeList()
-                    
-                    let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
-                        $0.winningRate > $1.winningRate
-                    }
-                    stockDisplayWinningRate = value
-                    isLoading = false
-                    print("処理時間: \(Date().timeIntervalSince(startTimer))秒")
+                    await reloadData()
                 }
             }
     }
@@ -158,50 +144,63 @@ struct YuutaiMonthWinningRateListScreen: View {
         }
     }
     
-    @MainActor
+    private func reloadData() async {
+        let startTimer = Date()
+        isLoading = true
+        
+        tanosiiYuutaiInfo = await getYuutaiCodeList()
+        
+        let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
+            $0.winningRate > $1.winningRate
+        }
+        stockDisplayWinningRate = value
+        isLoading = false
+        print("処理時間: \(Date().timeIntervalSince(startTimer))秒")
+    }
+    
     private func fetchStockWinningRate(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
         let descriptor = FetchDescriptor<YuutaiSakimawariChartModel>()
-        
         let allData = try? context.fetch(descriptor)
         let cacheData = allData?.filter { $0.month == month }
         
-        var stockWinningRate: [StockWinningRate] = []
-        
+        // キャッシュがあれば即返す（無駄なfetchをしない）
         if let cacheData, !cacheData.isEmpty {
-            // 新しい日付でデータを更新
-            
-            for item in cacheData {
-                let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
-                let result = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
-                stockWinningRate.append(result)
-            }
-            
-            return stockWinningRate
+            return await processChartModels(cacheData)
         }
         
+        // 新規取得
         let newData = await fetchAllStockInfo(stockInfo: tanosiiYuutaiInfo, month: month)
+        
+        var result: [StockWinningRate] = []
         for item in newData {
             let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
-            let result = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
-            stockWinningRate.append(result)
-        }
-        
-        // SwiftDataにデータを保存
-        stockWinningRate.forEach {
-            // TODO: ここで重複していない場合は追加にしたい
-            context
-                .insert(
+            let stockRate = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
+            result.append(stockRate)
+            
+            // 重複チェック
+            if !(allData?.contains(where: { $0.code == item.code && $0.month == month }) ?? false) {
+                context.insert(
                     YuutaiSakimawariChartModel(
-                        month: $0.month,
-                        name: $0.name,
-                        code: $0.code,
-                        creditType: $0.creditType,
-                        stockChartData: $0.stockChartData
+                        month: stockRate.month,
+                        name: stockRate.name,
+                        code: stockRate.code,
+                        creditType: stockRate.creditType,
+                        stockChartData: stockRate.stockChartData
                     )
                 )
+            }
         }
         
-        return stockWinningRate
+        return result
+    }
+    
+    private func processChartModels(_ models: [YuutaiSakimawariChartModel]) async -> [StockWinningRate] {
+        var result: [StockWinningRate] = []
+        for model in models {
+            let (winningRate, trialCount) = await calculateWinnigRate(chartData: model.stockChartData)
+            result.append(StockWinningRate(chartModel: model, winningRate: winningRate, totalCount: trialCount))
+        }
+        return result
     }
     
     private func getYuutaiCodeList() async -> [TanosiiYuutaiInfo] {
