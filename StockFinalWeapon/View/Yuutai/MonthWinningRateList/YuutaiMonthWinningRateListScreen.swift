@@ -127,6 +127,7 @@ struct YuutaiMonthWinningRateListScreen: View {
         .task {
             // 個別の検証から戻った時に通信が走ってしまうので弾く
             if stockDisplayWinningRate.isEmpty {
+                let startTimer = Date()
                 isLoading = true
                 
                 tanosiiYuutaiInfo = await getYuutaiCodeList()
@@ -136,6 +137,7 @@ struct YuutaiMonthWinningRateListScreen: View {
                 }
                 stockDisplayWinningRate = value
                 isLoading = false
+                print("処理時間: \(Date().timeIntervalSince(startTimer))秒")
             }
         }
     }
@@ -186,115 +188,12 @@ struct YuutaiMonthWinningRateListScreen: View {
     }
     
     private func getYuutaiCodeList() async -> [TanosiiYuutaiInfo] {
-        switch month {
-        case .january:
-            if let cache = UserStore.january {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.january = infoData
-                return infoData
-            }
-            
-        case .february:
-            if let cache = UserStore.february {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.february = infoData
-                return infoData
-            }
-            
-        case .march:
-            if let cache = UserStore.march {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.march = infoData
-                return infoData
-            }
-            
-        case .april:
-            if let cache = UserStore.april {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.april = infoData
-                return infoData
-            }
-            
-        case .may:
-            if let cache = UserStore.may {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.may = infoData
-                return infoData
-            }
-            
-        case .june:
-            if let cache = UserStore.june {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.june = infoData
-                return infoData
-            }
-            
-        case .july:
-            if let cache = UserStore.july {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.july = infoData
-                return infoData
-            }
-            
-        case .august:
-            if let cache = UserStore.august {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.august = infoData
-                return infoData
-            }
-            
-        case .september:
-            if let cache = UserStore.september {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.september = infoData
-                return infoData
-            }
-            
-        case .october:
-            if let cache = UserStore.october {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.october = infoData
-                return infoData
-            }
-            
-        case .november:
-            if let cache = UserStore.november {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.november = infoData
-                return infoData
-            }
-            
-        case .december:
-            if let cache = UserStore.december {
-                return cache
-            } else {
-                let infoData = await fetchStockInfo()
-                UserStore.december = infoData
-                return infoData
-            }
-            
+        if let cache = UserStore.cache(for: month) {
+            return cache
+        } else {
+            let infoData = await fetchStockInfo()
+            UserStore.setCache(infoData, for: month)
+            return infoData
         }
     }
 }
@@ -331,9 +230,6 @@ private extension YuutaiMonthWinningRateListScreen {
                     results.append(info)
                 }
             }
-            let end = Date()
-            let timeInterval = end.timeIntervalSince(start)
-            print("処理時間: \(timeInterval)秒")
             
             return results
         }

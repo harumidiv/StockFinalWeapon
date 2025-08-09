@@ -23,6 +23,40 @@ final class UserStore {
         case december
     }
     
+    static func cache(for month: YuutaiMonth) -> [TanosiiYuutaiInfo]? {
+        switch month {
+        case .january: return january
+        case .february: return february
+        case .march: return march
+        case .april: return april
+        case .may: return may
+        case .june: return june
+        case .july: return july
+        case .august: return august
+        case .september: return september
+        case .october: return october
+        case .november: return november
+        case .december: return december
+        }
+    }
+    
+    static func setCache(_ data: [TanosiiYuutaiInfo], for month: YuutaiMonth) {
+        switch month {
+        case .january: january = data
+        case .february: february = data
+        case .march: march = data
+        case .april: april = data
+        case .may: may = data
+        case .june: june = data
+        case .july: july = data
+        case .august: august = data
+        case .september: september = data
+        case .october: october = data
+        case .november: november = data
+        case .december: december = data
+        }
+    }
+    
     static var january: [TanosiiYuutaiInfo]? {
         get {
             if let data = UserDefaults.standard.data(forKey: Key.january.rawValue) {
