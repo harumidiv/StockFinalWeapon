@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 final class UserStore {
     private enum Key: String {
@@ -21,6 +22,37 @@ final class UserStore {
         case october
         case november
         case december
+    }
+    
+    static func deleteYuutaiInfo() {
+        for month in YuutaiMonth.allCases {
+            switch month {
+            case .january:
+                UserDefaults.standard.removeObject(forKey: Key.january.rawValue)
+            case .february:
+                UserDefaults.standard.removeObject(forKey: Key.february.rawValue)
+            case .march:
+                UserDefaults.standard.removeObject(forKey: Key.march.rawValue)
+            case .april:
+                UserDefaults.standard.removeObject(forKey: Key.april.rawValue)
+            case .may:
+                UserDefaults.standard.removeObject(forKey: Key.may.rawValue)
+            case .june:
+                UserDefaults.standard.removeObject(forKey: Key.june.rawValue)
+            case .july:
+                UserDefaults.standard.removeObject(forKey: Key.july.rawValue)
+            case .august:
+                UserDefaults.standard.removeObject(forKey: Key.august.rawValue)
+            case .september:
+                UserDefaults.standard.removeObject(forKey: Key.september.rawValue)
+            case .october:
+                UserDefaults.standard.removeObject(forKey: Key.october.rawValue)
+            case .november:
+                UserDefaults.standard.removeObject(forKey: Key.november.rawValue)
+            case .december:
+                UserDefaults.standard.removeObject(forKey: Key.december.rawValue)
+            }
+        }
     }
     
     static func getYuutaiInfo(for month: YuutaiMonth) -> [TanosiiYuutaiInfo]? {
@@ -285,3 +317,4 @@ final class UserStore {
         }
     }
 }
+

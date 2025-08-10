@@ -12,10 +12,12 @@ struct MypageScreen: View {
     @Environment(\.modelContext) private var context
     
     @State private var showingYuutaiCacheAlert = false
+    @State private var showingYuutaiInfoCacheAlert = false
     @State private var selectedMonth: YuutaiMonth?
     
     var body: some View {
         Form {
+            
             Section(header: Text("優待先周り📈データキャッシュ")) {
                 Button(action: {
                     showingYuutaiCacheAlert = true
@@ -25,6 +27,15 @@ struct MypageScreen: View {
                         Text("すべてのキャッシュデータをクリア")
                     }
                     .foregroundColor(.red)
+                }
+                
+                Button(action: {
+                    showingYuutaiInfoCacheAlert = true
+                }) {
+                    HStack {
+                        Image(systemName: "trash")
+                        Text("楽しい優待配当生活")
+                    }
                 }
                 
                 ForEach(YuutaiMonth.allCases) { month in
@@ -42,6 +53,14 @@ struct MypageScreen: View {
             }
         }
         .navigationTitle("マイページ")
+        .alert("楽しい優待配当生活キャッシュをクリアしますか？", isPresented: $showingYuutaiInfoCacheAlert) {
+            Button("キャンセル", role: .cancel) { }
+            Button("クリア", role: .destructive) {
+                UserStore.deleteYuutaiInfo()
+            }
+        } message: {
+            Text("アプリのパフォーマンスが改善される場合があります。")
+        }
         .alert("\(selectedMonth?.ja ?? "全ての")キャッシュをクリアしますか？", isPresented: $showingYuutaiCacheAlert) {
             Button("キャンセル", role: .cancel) {
                 self.selectedMonth = nil
@@ -57,6 +76,7 @@ struct MypageScreen: View {
                             cacheData = allData?.filter { $0.month == selectedMonth } ?? []
                             
                         } else {
+                            UserStore.deleteYuutaiInfo()
                             let fetchDescriptor = FetchDescriptor<YuutaiSakimawariChartModel>()
                             cacheData = try context.fetch(fetchDescriptor)
                         }
