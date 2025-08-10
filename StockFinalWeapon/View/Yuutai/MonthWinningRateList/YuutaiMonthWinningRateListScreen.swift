@@ -58,7 +58,7 @@ struct YuutaiMonthWinningRateListScreen: View {
             }
             .navigationDestination(for: StockWinningRate.self) { info in
                 YuutaiAnticipationView(
-                    code: .constant(info.code),
+                    code: .constant(info.yuutaiInfo.code),
                     purchaseDate: $purchaseDate,
                     saleDate: $saleDate
                 )
@@ -119,25 +119,34 @@ struct YuutaiMonthWinningRateListScreen: View {
             }
             .padding(.horizontal)
             
-            List(stockDisplayWinningRate) { info in
-                NavigationLink(value: info) {
+            List(stockDisplayWinningRate) { stock in
+                NavigationLink(value: stock) {
                     HStack {
+                        
                         VStack(alignment: .leading) {
-                            Text(info.name).lineLimit(1)
-                            Text(info.code)
+                            HStack {
+                                Text(stock.yuutaiInfo.code)
+                                Text(stock.yuutaiInfo.name).lineLimit(1)
+                            }
+                            
+                            if let yuutai = stock.yuutaiInfo.yuutai {
+                                Text(yuutai)
+                                    .lineLimit(1)
+                                    .font(.footnote)
+                            }
                         }
                         
                         Spacer()
                         
                         VStack(alignment: .leading) {
-                            if let creditType = info.creditType {
+                            if let creditType = stock.yuutaiInfo.creditType {
                                 Text(creditType)
                             }
-                            Text("検証回数: \(info.totalCount)回")
+                            Text("検証回数: \(stock.totalCount)回")
                         }
                         
-                        Text(String(format: "%.1f%%", info.winningRate))
-                            .foregroundColor(info.winningRate >= 50 ? .red : .blue)
+                        Text(String(format: "%.1f%%", stock.winningRate))
+                            .foregroundColor(stock.winningRate >= 50 ? .red : .blue)
                     }
                 }
             }
@@ -182,9 +191,10 @@ struct YuutaiMonthWinningRateListScreen: View {
                 context.insert(
                     YuutaiSakimawariChartModel(
                         month: stockRate.month,
-                        name: stockRate.name,
-                        code: stockRate.code,
-                        creditType: stockRate.creditType,
+                        name: stockRate.yuutaiInfo.name,
+                        code: stockRate.yuutaiInfo.code,
+                        yuutai: stockRate.yuutaiInfo.yuutai,
+                        creditType: stockRate.yuutaiInfo.creditType,
                         stockChartData: stockRate.stockChartData
                     )
                 )

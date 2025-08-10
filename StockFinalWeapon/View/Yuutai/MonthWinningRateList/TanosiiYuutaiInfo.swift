@@ -5,7 +5,7 @@
 //  Created by 佐川 晴海 on 2025/08/07.
 //
 
-struct TanosiiYuutaiInfo: Codable {
+struct TanosiiYuutaiInfo: Codable, Hashable {
     let name: String
     let code: String
     let yuutai: String?

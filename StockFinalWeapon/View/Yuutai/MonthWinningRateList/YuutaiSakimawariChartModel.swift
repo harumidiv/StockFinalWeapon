@@ -13,6 +13,7 @@ final class YuutaiSakimawariChartModel: Identifiable, Hashable {
     var month: YuutaiMonth
     var name: String
     var code: String
+    var yuutai: String?
     var creditType: String?
     var stockChartData: [MyStockChartData]
     
@@ -20,14 +21,16 @@ final class YuutaiSakimawariChartModel: Identifiable, Hashable {
         self.month = month
         self.name = yuutaiInfo.name
         self.code = yuutaiInfo.code
+        self.yuutai = yuutaiInfo.yuutai
         self.creditType = yuutaiInfo.creditType
         self.stockChartData = stockChartData
     }
     
-    init(month: YuutaiMonth, name: String, code: String, creditType: String?, stockChartData: [MyStockChartData]) {
+    init(month: YuutaiMonth, name: String, code: String, yuutai: String?, creditType: String?, stockChartData: [MyStockChartData]) {
         self.month = month
         self.name = name
         self.code = code
+        self.yuutai = yuutai
         self.creditType = creditType
         self.stockChartData = stockChartData
     }
