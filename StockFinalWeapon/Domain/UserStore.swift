@@ -24,10 +24,39 @@ final class UserStore {
         case december
     }
     
-    static func deleteYuutaiInfo() {
-        if let bundleID = Bundle.main.bundleIdentifier {
-            UserDefaults.standard.removePersistentDomain(forName: bundleID)
-            UserDefaults.standard.synchronize() // 即反映（今はほぼ不要）
+    static func deleteAllYuutaiInfo() {
+        for month in YuutaiMonth.allCases {
+            deleteYuutaiInfo(month: month)
+        }
+        UserDefaults.standard.synchronize()
+    }
+    
+    static func deleteYuutaiInfo(month: YuutaiMonth) {
+        switch month {
+        case .january:
+            UserDefaults.standard.removeObject(forKey: Key.january.rawValue)
+        case .february:
+            UserDefaults.standard.removeObject(forKey: Key.february.rawValue)
+        case .march:
+            UserDefaults.standard.removeObject(forKey: Key.march.rawValue)
+        case .april:
+            UserDefaults.standard.removeObject(forKey: Key.april.rawValue)
+        case .may:
+            UserDefaults.standard.removeObject(forKey: Key.may.rawValue)
+        case .june:
+            UserDefaults.standard.removeObject(forKey: Key.june.rawValue)
+        case .july:
+            UserDefaults.standard.removeObject(forKey: Key.july.rawValue)
+        case .august:
+            UserDefaults.standard.removeObject(forKey: Key.august.rawValue)
+        case .september:
+            UserDefaults.standard.removeObject(forKey: Key.september.rawValue)
+        case .october:
+            UserDefaults.standard.removeObject(forKey: Key.october.rawValue)
+        case .november:
+            UserDefaults.standard.removeObject(forKey: Key.november.rawValue)
+        case .december:
+            UserDefaults.standard.removeObject(forKey: Key.december.rawValue)
         }
     }
     

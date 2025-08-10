@@ -29,15 +29,6 @@ struct MypageScreen: View {
                     .foregroundColor(.red)
                 }
                 
-                Button(action: {
-                    showingYuutaiInfoCacheAlert = true
-                }) {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("楽しい優待配当生活")
-                    }
-                }
-                
                 ForEach(YuutaiMonth.allCases) { month in
                     Button(action: {
                         showingYuutaiCacheAlert = true
@@ -53,14 +44,6 @@ struct MypageScreen: View {
             }
         }
         .navigationTitle("マイページ")
-        .alert("楽しい優待配当生活キャッシュをクリアしますか？", isPresented: $showingYuutaiInfoCacheAlert) {
-            Button("キャンセル", role: .cancel) { }
-            Button("クリア", role: .destructive) {
-                UserStore.deleteYuutaiInfo()
-            }
-        } message: {
-            Text("アプリのパフォーマンスが改善される場合があります。")
-        }
         .alert("\(selectedMonth?.ja ?? "全ての")キャッシュをクリアしますか？", isPresented: $showingYuutaiCacheAlert) {
             Button("キャンセル", role: .cancel) {
                 self.selectedMonth = nil
@@ -71,12 +54,13 @@ struct MypageScreen: View {
                         let cacheData: [YuutaiSakimawariChartModel]
                         
                         if let selectedMonth {
+                            UserStore.deleteYuutaiInfo(month: selectedMonth)
                             let descriptor = FetchDescriptor<YuutaiSakimawariChartModel>()
                             let allData = try? context.fetch(descriptor)
                             cacheData = allData?.filter { $0.month == selectedMonth } ?? []
                             
                         } else {
-                            UserStore.deleteYuutaiInfo()
+                            UserStore.deleteAllYuutaiInfo()
                             let fetchDescriptor = FetchDescriptor<YuutaiSakimawariChartModel>()
                             cacheData = try context.fetch(fetchDescriptor)
                         }
