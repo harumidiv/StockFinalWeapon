@@ -36,8 +36,8 @@ struct YuutaiAnticipationView: View {
                     .environment(\.locale, Locale(identifier: "ja_JP"))
             }
             
-            Section(header: Text("優待内容:")) {
-                if let yuutai = yuutai {
+            if let yuutai = yuutai {
+                Section(header: Text("優待内容:")) {
                     Text(yuutai)
                         .font(.footnote)
                 }
