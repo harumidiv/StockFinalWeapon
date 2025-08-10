@@ -60,7 +60,8 @@ struct YuutaiMonthWinningRateListScreen: View {
                 YuutaiAnticipationView(
                     code: .constant(info.yuutaiInfo.code),
                     purchaseDate: $purchaseDate,
-                    saleDate: $saleDate
+                    saleDate: $saleDate,
+                    yuutai: info.yuutaiInfo.yuutai
                 )
             }
             .navigationTitle(verificationRange)
@@ -124,29 +125,26 @@ struct YuutaiMonthWinningRateListScreen: View {
                     HStack {
                         
                         VStack(alignment: .leading) {
-                            HStack {
-                                Text(stock.yuutaiInfo.code)
-                                Text(stock.yuutaiInfo.name).lineLimit(1)
-                            }
-                            
-                            if let yuutai = stock.yuutaiInfo.yuutai {
-                                Text(yuutai)
-                                    .lineLimit(1)
-                                    .font(.footnote)
-                            }
+                            Text(stock.yuutaiInfo.code)
+                            Text(stock.yuutaiInfo.name).lineLimit(1)
                         }
                         
                         Spacer()
                         
-                        VStack(alignment: .leading) {
-                            if let creditType = stock.yuutaiInfo.creditType {
-                                Text(creditType)
+                        VStack(alignment: .trailing) {
+                            
+                            HStack {
+                                if let creditType = stock.yuutaiInfo.creditType {
+                                    Text(creditType)
+                                }
+                                
+                                Text(String(format: "%.1f%%", stock.winningRate))
+                                    .foregroundColor(stock.winningRate >= 50 ? .red : .blue)
                             }
-                            Text("検証回数: \(stock.totalCount)回")
+                            Text("試行回数: \(stock.totalCount)回")
                         }
                         
-                        Text(String(format: "%.1f%%", stock.winningRate))
-                            .foregroundColor(stock.winningRate >= 50 ? .red : .blue)
+                        
                     }
                 }
             }
