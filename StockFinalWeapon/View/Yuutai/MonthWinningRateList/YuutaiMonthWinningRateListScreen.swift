@@ -87,8 +87,9 @@ struct YuutaiMonthWinningRateListScreen: View {
             HStack {
                 Text("勝ち条件")
                 Picker("勝利条件", selection: $selectedWinParcent) {
-                    ForEach(0...10, id: \.self) { number in
-                        Text("\(number)").tag(number)
+                    ForEach(0..<100, id: \.self) { number in
+                        let value = Double(number) / 10.0
+                        Text(String(format: "%.1f", value)).tag(value)
                     }
                 }
                 .pickerStyle(.wheel)
@@ -293,7 +294,7 @@ private extension YuutaiMonthWinningRateListScreen {
         }
         
         let pairs = await YuutaiUtil.fetchStockPrice(stockChartData: verificationPeriod, purchaseDay: purchaseDate, saleDay: saleDate)
-        return (YuutaiUtil.riseRateString(for: pairs, parcent: Float(selectedWinParcent)), YuutaiUtil.trialCount(for: pairs))
+        return (YuutaiUtil.riseRateString(for: pairs, parcent: Float(selectedWinParcent)/10.0), YuutaiUtil.trialCount(for: pairs))
     }
 }
 
