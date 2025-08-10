@@ -14,6 +14,7 @@ struct YuutaiAnticipationView: View {
     @Binding var code: String
     @Binding var purchaseDate: Date
     @Binding var saleDate: Date
+    var yuutai: String?
     @State private var errorText: String = "銘柄コードを入力してください"
     @FocusState private var isFocused: Bool
     
@@ -33,6 +34,13 @@ struct YuutaiAnticipationView: View {
                     .environment(\.locale, Locale(identifier: "ja_JP"))
                 DatePicker("売却日", selection: $saleDate, displayedComponents: .date)
                     .environment(\.locale, Locale(identifier: "ja_JP"))
+            }
+            
+            if let yuutai = yuutai {
+                Section(header: Text("優待内容:")) {
+                    Text(yuutai)
+                        .font(.footnote)
+                }
             }
             
             if !errorText.isEmpty {

@@ -18,7 +18,7 @@ struct YuutaiMonthWinningRateListScreen: View {
     
     @State private var selectedStock: YuutaiSakimawariChartModel? = nil
     @State private var isLoading: Bool = true
-    @State private var selectedYear: Int = 10
+    @State private var selectedYear: Int = 5
     @State private var selectedWinParcent: Int = 0
     
     private let baseURL = "https://www.kabuyutai.com/yutai/"
@@ -58,9 +58,10 @@ struct YuutaiMonthWinningRateListScreen: View {
             }
             .navigationDestination(for: StockWinningRate.self) { info in
                 YuutaiAnticipationView(
-                    code: .constant(info.code),
+                    code: .constant(info.yuutaiInfo.code),
                     purchaseDate: $purchaseDate,
-                    saleDate: $saleDate
+                    saleDate: $saleDate,
+                    yuutai: info.yuutaiInfo.yuutai
                 )
             }
             .navigationTitle(verificationRange)
@@ -119,25 +120,31 @@ struct YuutaiMonthWinningRateListScreen: View {
             }
             .padding(.horizontal)
             
-            List(stockDisplayWinningRate) { info in
-                NavigationLink(value: info) {
+            List(stockDisplayWinningRate) { stock in
+                NavigationLink(value: stock) {
                     HStack {
+                        
                         VStack(alignment: .leading) {
-                            Text(info.name).lineLimit(1)
-                            Text(info.code)
+                            Text(stock.yuutaiInfo.code)
+                            Text(stock.yuutaiInfo.name).lineLimit(1)
                         }
                         
                         Spacer()
                         
-                        VStack(alignment: .leading) {
-                            if let creditType = info.creditType {
-                                Text(creditType)
+                        VStack(alignment: .trailing) {
+                            
+                            HStack {
+                                if let creditType = stock.yuutaiInfo.creditType {
+                                    Text(creditType)
+                                }
+                                
+                                Text(String(format: "%.1f%%", stock.winningRate))
+                                    .foregroundColor(stock.winningRate >= 50 ? .red : .blue)
                             }
-                            Text("検証回数: \(info.totalCount)回")
+                            Text("試行回数: \(stock.totalCount)回")
                         }
                         
-                        Text(String(format: "%.1f%%", info.winningRate))
-                            .foregroundColor(info.winningRate >= 50 ? .red : .blue)
+                        
                     }
                 }
             }
@@ -182,9 +189,10 @@ struct YuutaiMonthWinningRateListScreen: View {
                 context.insert(
                     YuutaiSakimawariChartModel(
                         month: stockRate.month,
-                        name: stockRate.name,
-                        code: stockRate.code,
-                        creditType: stockRate.creditType,
+                        name: stockRate.yuutaiInfo.name,
+                        code: stockRate.yuutaiInfo.code,
+                        yuutai: stockRate.yuutaiInfo.yuutai,
+                        creditType: stockRate.yuutaiInfo.creditType,
                         stockChartData: stockRate.stockChartData
                     )
                 )
@@ -207,7 +215,7 @@ struct YuutaiMonthWinningRateListScreen: View {
         if let cache = month.tanosiiYuutaiInfo {
             return cache
         } else {
-            let infoData = await fetchStockInfo()
+            let infoData = await fetchTanoshiiYuutaiInfo()
             UserStore.setYuutaiInfo(infoData, for: month)
             return infoData
         }
@@ -291,7 +299,7 @@ private extension YuutaiMonthWinningRateListScreen {
 
 // 楽しい配当優待生活から指定月の銘柄コード一覧を取得
 private extension YuutaiMonthWinningRateListScreen {
-    func fetchStockInfo() async -> [TanosiiYuutaiInfo] {
+    func fetchTanoshiiYuutaiInfo() async -> [TanosiiYuutaiInfo] {
         var page = 1
         var stockInfo: [TanosiiYuutaiInfo] = []
         
@@ -354,6 +362,18 @@ private extension YuutaiMonthWinningRateListScreen {
                     continue
                 }
                 
+                // 優待内容の取得
+                var yuutai: String? = nil
+                if let pTags: Elements = try infoDiv?.select("p") {
+                    for p in pTags {
+                        let text = try p.text()
+                        if text.contains("【優待内容】") {
+                            let content = text.replacingOccurrences(of: "【優待内容】", with: "")
+                            yuutai = content
+                        }
+                    }
+                }
+                
                 // 信用貸借区分の取得
                 var credit: String? = nil
                 if let taishakuP = try infoDiv?.select("p.taishaku").first(),
@@ -361,7 +381,7 @@ private extension YuutaiMonthWinningRateListScreen {
                     credit = try bTag.text()
                 }
                 
-                result.append(TanosiiYuutaiInfo(name: name, code: code, creditType: credit))
+                result.append(TanosiiYuutaiInfo(name: name, code: code, yuutai: yuutai, creditType: credit))
             }
         } catch {
             print("エラー: \(error)")
