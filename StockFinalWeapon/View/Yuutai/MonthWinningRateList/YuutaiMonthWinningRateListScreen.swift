@@ -207,7 +207,7 @@ struct YuutaiMonthWinningRateListScreen: View {
         if let cache = month.tanosiiYuutaiInfo {
             return cache
         } else {
-            let infoData = await fetchStockInfo()
+            let infoData = await fetchTanoshiiYuutaiInfo()
             UserStore.setYuutaiInfo(infoData, for: month)
             return infoData
         }
@@ -291,7 +291,7 @@ private extension YuutaiMonthWinningRateListScreen {
 
 // 楽しい配当優待生活から指定月の銘柄コード一覧を取得
 private extension YuutaiMonthWinningRateListScreen {
-    func fetchStockInfo() async -> [TanosiiYuutaiInfo] {
+    func fetchTanoshiiYuutaiInfo() async -> [TanosiiYuutaiInfo] {
         var page = 1
         var stockInfo: [TanosiiYuutaiInfo] = []
         
@@ -354,6 +354,18 @@ private extension YuutaiMonthWinningRateListScreen {
                     continue
                 }
                 
+                // 優待内容の取得
+                var yuutai: String? = nil
+                if let pTags: Elements = try infoDiv?.select("p") {
+                    for p in pTags {
+                        let text = try p.text()
+                        if text.contains("【優待内容】") {
+                            let content = text.replacingOccurrences(of: "【優待内容】", with: "")
+                            yuutai = content
+                        }
+                    }
+                }
+                
                 // 信用貸借区分の取得
                 var credit: String? = nil
                 if let taishakuP = try infoDiv?.select("p.taishaku").first(),
@@ -361,7 +373,7 @@ private extension YuutaiMonthWinningRateListScreen {
                     credit = try bTag.text()
                 }
                 
-                result.append(TanosiiYuutaiInfo(name: name, code: code, creditType: credit))
+                result.append(TanosiiYuutaiInfo(name: name, code: code, yuutai: yuutai, creditType: credit))
             }
         } catch {
             print("エラー: \(error)")

@@ -8,5 +8,6 @@
 struct TanosiiYuutaiInfo: Codable {
     let name: String
     let code: String
+    let yuutai: String?
     let creditType: String?
 }
