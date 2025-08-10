@@ -18,7 +18,7 @@ struct YuutaiMonthWinningRateListScreen: View {
     
     @State private var selectedStock: YuutaiSakimawariChartModel? = nil
     @State private var isLoading: Bool = true
-    @State private var selectedYear: Int = 10
+    @State private var selectedYear: Int = 5
     @State private var selectedWinParcent: Int = 0
     
     private let baseURL = "https://www.kabuyutai.com/yutai/"
