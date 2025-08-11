@@ -10,6 +10,13 @@ import SwiftSoup
 import SwiftYFinance
 import SwiftData
 
+enum Sort: String, CaseIterable, Identifiable {
+    case winningRate = "勝率順"
+    case expectedValue = "期待値順"
+    
+    var id: Self { self }
+}
+
 struct YuutaiMonthWinningRateListScreen: View {
     @Environment(\.modelContext) private var context
     
@@ -20,6 +27,8 @@ struct YuutaiMonthWinningRateListScreen: View {
     @State private var isLoading: Bool = true
     @State private var selectedYear: Int = 5
     @State private var selectedWinParcent: Int = 0
+    
+    @State private var sortCase: Sort = .winningRate
     
     private let baseURL = "https://www.kabuyutai.com/yutai/"
     @Binding var purchaseDate: Date
@@ -79,6 +88,15 @@ struct YuutaiMonthWinningRateListScreen: View {
                 let count = tanosiiYuutaiInfo.count == 0 ? "--" : tanosiiYuutaiInfo.count.description
                 Text("\(month.ja)優待 \(count)銘柄")
                 
+                Picker("sort順", selection: $sortCase) {
+                    ForEach(Sort.allCases) { value in
+                        Text(value.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: sortCase) {
+                    updateList(sortedBy: sortCase)
+                }
                 Spacer()
                 
             }
@@ -126,21 +144,27 @@ struct YuutaiMonthWinningRateListScreen: View {
                     HStack {
                         
                         VStack(alignment: .leading) {
-                            Text(stock.yuutaiInfo.code)
+                            HStack {
+                                Text(stock.yuutaiInfo.code)
+                                if let creditType = stock.yuutaiInfo.creditType {
+                                    Text(creditType)
+                                }
+                            }
                             Text(stock.yuutaiInfo.name).lineLimit(1)
                         }
                         
                         Spacer()
                         
                         VStack(alignment: .trailing) {
-                            
-                            HStack {
-                                if let creditType = stock.yuutaiInfo.creditType {
-                                    Text(creditType)
-                                }
-                                
+                            HStack(spacing: 0) {
+                                Text("勝率: ")
                                 Text(String(format: "%.1f%%", stock.winningRate))
                                     .foregroundColor(stock.winningRate >= 50 ? .red : .blue)
+                            }
+                            HStack(spacing: 0) {
+                                Text("期待値: ")
+                                Text(String(format: "%.1f%%", stock.expectedValue))
+                                    .foregroundColor(stock.expectedValue >= 0 ? .red : .blue)
                             }
                             Text("試行回数: \(stock.totalCount)回")
                         }
@@ -159,11 +183,27 @@ struct YuutaiMonthWinningRateListScreen: View {
         tanosiiYuutaiInfo = await getYuutaiCodeList()
         
         let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
-            $0.winningRate > $1.winningRate
+            switch sortCase {
+            case .winningRate:
+                 return $0.winningRate > $1.winningRate
+            case .expectedValue:
+                return $0.expectedValue > $1.expectedValue
+            }
         }
         stockDisplayWinningRate = value
         isLoading = false
         print("処理時間: \(Date().timeIntervalSince(startTimer))秒")
+    }
+    
+    private func updateList(sortedBy: Sort) {
+        withAnimation {
+            switch sortCase {
+            case .winningRate:
+                stockDisplayWinningRate.sort { $0.winningRate > $1.winningRate }
+            case .expectedValue:
+                stockDisplayWinningRate.sort { $0.expectedValue > $1.expectedValue }
+            }
+        }
     }
     
     private func fetchStockWinningRate(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
@@ -181,8 +221,8 @@ struct YuutaiMonthWinningRateListScreen: View {
         
         var result: [StockWinningRate] = []
         for item in newData {
-            let (winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
-            let stockRate = StockWinningRate(chartModel: item, winningRate: winningRate, totalCount: trialCount)
+            let (expectedValue, winningRate, trialCount) = await calculateWinnigRate(chartData: item.stockChartData)
+            let stockRate = StockWinningRate(chartModel: item, expectedValue: expectedValue, winningRate: winningRate, totalCount: trialCount)
             result.append(stockRate)
             
             // 重複チェック
@@ -206,8 +246,8 @@ struct YuutaiMonthWinningRateListScreen: View {
     private func processChartModels(_ models: [YuutaiSakimawariChartModel]) async -> [StockWinningRate] {
         var result: [StockWinningRate] = []
         for model in models {
-            let (winningRate, trialCount) = await calculateWinnigRate(chartData: model.stockChartData)
-            result.append(StockWinningRate(chartModel: model, winningRate: winningRate, totalCount: trialCount))
+            let (expectedValue, winningRate, trialCount) = await calculateWinnigRate(chartData: model.stockChartData)
+            result.append(StockWinningRate(chartModel: model, expectedValue: expectedValue, winningRate: winningRate, totalCount: trialCount))
         }
         return result
     }
@@ -261,24 +301,10 @@ private extension YuutaiMonthWinningRateListScreen {
         return value.compactMap{ YuutaiSakimawariChartModel(month: month, yuutaiInfo: $0.info, stockChartData: $0.chartData) }
     }
     
-    func fetchWinningRateAndTrialCount(for code: String) async -> ([MyStockChartData], Float, Int)? {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy/MM/dd"
-        // 存在しないデータはスキップされるのでかなり昔から取得
-        let start = dateFormatter.date(from: "1980/1/3")!
-        
-        let result = await YahooYFinanceAPIService().fetchStockChartData(code: code, startDate: start, endDate: Date())
-        switch result {
-        case .success(let stockChartData):
-            let winningRateAndTrialCount = await calculateWinnigRate(chartData: stockChartData)
-            return (stockChartData, winningRateAndTrialCount.0, winningRateAndTrialCount.1)
-            
-        case .failure(_):
-            return nil
-        }
-    }
-    
-    func calculateWinnigRate(chartData: [MyStockChartData]) async -> (Float, Int) {
+    /// 勝率を計算
+    /// - Parameter chartData: 対になるチャートデータ
+    /// - Returns: (期待値, 勝率, 試行回数)
+    func calculateWinnigRate(chartData: [MyStockChartData]) async -> (Float, Float, Int) {
         let calendar = Calendar.current
         let today = Date()
         let tenYearsAgoYear = calendar.component(.year, from: today) - selectedYear
@@ -294,7 +320,7 @@ private extension YuutaiMonthWinningRateListScreen {
         }
         
         let pairs = await YuutaiUtil.fetchStockPrice(stockChartData: verificationPeriod, purchaseDay: purchaseDate, saleDay: saleDate)
-        return (YuutaiUtil.riseRateString(for: pairs, parcent: Float(selectedWinParcent)/10.0), YuutaiUtil.trialCount(for: pairs))
+        return (YuutaiUtil.expectedValue(for: pairs), YuutaiUtil.riseRateString(for: pairs, parcent: Float(selectedWinParcent)/10.0), YuutaiUtil.trialCount(for: pairs))
     }
 }
 

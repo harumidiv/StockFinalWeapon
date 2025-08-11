@@ -16,6 +16,17 @@ struct YuutaiUtil {
         return percent
     }
     
+    /// 期待値の取得
+    /// - Parameter data: 比較するデータ
+    /// - Returns: 勝率%付き
+    static func expectedValue(for data: [StockChartPairData]) -> Float {
+        let valid = data.compactMap { $0.valueChangeParcent }
+        guard !valid.isEmpty else { return 0 }
+        
+        let sum = valid.reduce(0.0, +)
+        let average = sum / Float(valid.count)
+        return average
+    }
     
     /// 検証を行った回数
     /// - Parameter data: 比較するデータ
