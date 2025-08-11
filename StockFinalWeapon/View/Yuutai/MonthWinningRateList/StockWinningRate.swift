@@ -12,13 +12,15 @@ struct StockWinningRate: Identifiable, Hashable {
     let month: YuutaiMonth
     let yuutaiInfo: TanosiiYuutaiInfo
     let stockChartData: [MyStockChartData]
+    let expectedValue: Float
     let winningRate: Float
     let totalCount: Int
     
-    init(chartModel: YuutaiSakimawariChartModel, winningRate: Float, totalCount: Int) {
+    init(chartModel: YuutaiSakimawariChartModel,expectedValue: Float, winningRate: Float, totalCount: Int) {
         self.month = chartModel.month
         self.yuutaiInfo = TanosiiYuutaiInfo(name: chartModel.name, code: chartModel.code, yuutai: chartModel.yuutai, creditType: chartModel.creditType)
         self.stockChartData = chartModel.stockChartData
+        self.expectedValue = expectedValue
         self.winningRate = winningRate
         self.totalCount = totalCount
     }
