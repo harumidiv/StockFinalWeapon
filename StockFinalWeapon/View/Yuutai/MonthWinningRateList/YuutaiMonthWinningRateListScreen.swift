@@ -126,21 +126,27 @@ struct YuutaiMonthWinningRateListScreen: View {
                     HStack {
                         
                         VStack(alignment: .leading) {
-                            Text(stock.yuutaiInfo.code)
+                            HStack {
+                                Text(stock.yuutaiInfo.code)
+                                if let creditType = stock.yuutaiInfo.creditType {
+                                    Text(creditType)
+                                }
+                            }
                             Text(stock.yuutaiInfo.name).lineLimit(1)
                         }
                         
                         Spacer()
                         
                         VStack(alignment: .trailing) {
-                            
-                            HStack {
-                                if let creditType = stock.yuutaiInfo.creditType {
-                                    Text(creditType)
-                                }
-                                
+                            HStack(spacing: 0) {
+                                Text("勝率: ")
                                 Text(String(format: "%.1f%%", stock.winningRate))
                                     .foregroundColor(stock.winningRate >= 50 ? .red : .blue)
+                            }
+                            HStack(spacing: 0) {
+                                Text("期待値: ")
+                                Text(String(format: "%.1f%%", stock.expectedValue))
+                                    .foregroundColor(stock.expectedValue >= 0 ? .red : .blue)
                             }
                             Text("試行回数: \(stock.totalCount)回")
                         }
