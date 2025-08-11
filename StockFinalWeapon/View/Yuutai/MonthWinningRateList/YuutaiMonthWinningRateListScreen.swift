@@ -94,6 +94,9 @@ struct YuutaiMonthWinningRateListScreen: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: sortCase) {
+                    updateList(sortedBy: sortCase)
+                }
                 Spacer()
                 
             }
@@ -180,11 +183,27 @@ struct YuutaiMonthWinningRateListScreen: View {
         tanosiiYuutaiInfo = await getYuutaiCodeList()
         
         let value = await fetchStockWinningRate(tanosiiYuutaiInfo: tanosiiYuutaiInfo).sorted {
-            $0.winningRate > $1.winningRate
+            switch sortCase {
+            case .winningRate:
+                 return $0.winningRate > $1.winningRate
+            case .expectedValue:
+                return $0.expectedValue > $1.expectedValue
+            }
         }
         stockDisplayWinningRate = value
         isLoading = false
         print("処理時間: \(Date().timeIntervalSince(startTimer))秒")
+    }
+    
+    private func updateList(sortedBy: Sort) {
+        withAnimation {
+            switch sortCase {
+            case .winningRate:
+                stockDisplayWinningRate.sort { $0.winningRate > $1.winningRate }
+            case .expectedValue:
+                stockDisplayWinningRate.sort { $0.expectedValue > $1.expectedValue }
+            }
+        }
     }
     
     private func fetchStockWinningRate(tanosiiYuutaiInfo: [TanosiiYuutaiInfo]) async -> [StockWinningRate] {
