@@ -10,6 +10,13 @@ import SwiftSoup
 import SwiftYFinance
 import SwiftData
 
+enum Sort: String, CaseIterable, Identifiable {
+    case winningRate = "勝率順"
+    case expectedValue = "期待値順"
+    
+    var id: Self { self }
+}
+
 struct YuutaiMonthWinningRateListScreen: View {
     @Environment(\.modelContext) private var context
     
@@ -20,6 +27,8 @@ struct YuutaiMonthWinningRateListScreen: View {
     @State private var isLoading: Bool = true
     @State private var selectedYear: Int = 5
     @State private var selectedWinParcent: Int = 0
+    
+    @State private var sortCase: Sort = .winningRate
     
     private let baseURL = "https://www.kabuyutai.com/yutai/"
     @Binding var purchaseDate: Date
@@ -79,6 +88,12 @@ struct YuutaiMonthWinningRateListScreen: View {
                 let count = tanosiiYuutaiInfo.count == 0 ? "--" : tanosiiYuutaiInfo.count.description
                 Text("\(month.ja)優待 \(count)銘柄")
                 
+                Picker("sort順", selection: $sortCase) {
+                    ForEach(Sort.allCases) { value in
+                        Text(value.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
                 Spacer()
                 
             }
