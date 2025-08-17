@@ -19,7 +19,7 @@ struct MypageScreen: View {
     var body: some View {
         Form {
             Section(header: Text("通知設定")) {
-                Toggle("権利付き最終日お知らせ通知", isOn: $yuutaiRecordDatePushNotification)
+                Toggle("権利付き最終日お知らせ", isOn: $yuutaiRecordDatePushNotification)
             }
             .onChange(of: yuutaiRecordDatePushNotification) { oldValue, newValue in
                 if newValue {
