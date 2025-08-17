@@ -9,7 +9,7 @@ import Foundation
 import SwiftUI
 
 final class UserStore {
-    private enum Key: String {
+    enum Key: String {
         case january
         case february
         case march

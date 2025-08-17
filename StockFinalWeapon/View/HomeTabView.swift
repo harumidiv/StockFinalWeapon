@@ -71,47 +71,12 @@ struct HomeTabView: View {
         }
         .onAppear {
             if UserStore.yuutaiRecordDatePushNotification {
-                let calender = Calendar.current
-                let year = calender.component(.year, from: Date())
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy/MM/dd"
-                let list = YuutaiDateChecker.shareholderBenefitEligibleDays(in: year)
-                scheduleLocalNotification(dates: list)
+                YuutaiDateChecker.scheduleYuutaiLocalNotification()
             }
         }
     }
     
-    func scheduleLocalNotification(dates: [Date]) {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { (granted, error) in
-            
-            if granted {
-                dates.forEach { date in
-                    let calender = Calendar.current
-                    let year = calender.component(.year, from: date)
-                    let month = calender.component(.month, from: date)
-                    let day = calender.component(.day, from: date)
-                    let dateComponents = DateComponents(year: year, month: month, day: day, hour: 19)
-                    
-                    let content = UNMutableNotificationContent()
-                    content.title = "優待権利付き最終日"
-                    content.body = "現渡しわすれてない？"
-                    content.sound = UNNotificationSound.default
-                    
-                    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)
-                    
-                    let request = UNNotificationRequest(identifier: month.description, content: content, trigger: trigger)
-                    
-                    UNUserNotificationCenter.current().add(request) { (error) in
-                        if let error = error {
-                            print("⚠️通知のスケジュールに失敗しました: \(error.localizedDescription)")
-                        }
-                    }
-                }
-            } else {
-                print("⚠️通知の許可が拒否されました。")
-            }
-        }
-    }
+    
 }
 
 

@@ -10,6 +10,7 @@ import SwiftData
 
 struct MypageScreen: View {
     @Environment(\.modelContext) private var context
+    @AppStorage(UserStore.Key.yuutaiRecordDatePushNotification.rawValue) var yuutaiRecordDatePushNotification: Bool  = false
     
     @State private var showingYuutaiCacheAlert = false
     @State private var showingYuutaiInfoCacheAlert = false
@@ -17,6 +18,16 @@ struct MypageScreen: View {
     
     var body: some View {
         Form {
+            Section(header: Text("通知設定")) {
+                Toggle("権利付き最終日お知らせ通知", isOn: $yuutaiRecordDatePushNotification)
+            }
+            .onChange(of: yuutaiRecordDatePushNotification) { oldValue, newValue in
+                if newValue {
+                    YuutaiDateChecker.scheduleYuutaiLocalNotification()
+                } else {
+                    UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+                }
+            }
             
             Section(header: Text("優待先周り📈データキャッシュ")) {
                 Button(action: {
@@ -86,3 +97,4 @@ struct MypageScreen: View {
 #Preview {
     MypageScreen()
 }
+
