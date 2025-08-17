@@ -69,7 +69,14 @@ struct HomeTabView: View {
             }
             .background(.ultraThinMaterial)
         }
+        .onAppear {
+            if UserStore.yuutaiRecordDatePushNotification {
+                YuutaiDateChecker.scheduleYuutaiLocalNotification()
+            }
+        }
     }
+    
+    
 }
 
 

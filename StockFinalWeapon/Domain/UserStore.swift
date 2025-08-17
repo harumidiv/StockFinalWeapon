@@ -9,7 +9,7 @@ import Foundation
 import SwiftUI
 
 final class UserStore {
-    private enum Key: String {
+    enum Key: String {
         case january
         case february
         case march
@@ -22,6 +22,8 @@ final class UserStore {
         case october
         case november
         case december
+        
+        case yuutaiRecordDatePushNotification
     }
     
     static func deleteAllYuutaiInfo() {
@@ -91,6 +93,16 @@ final class UserStore {
         case .october: october = data
         case .november: november = data
         case .december: december = data
+        }
+    }
+    
+    static var yuutaiRecordDatePushNotification: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: Key.yuutaiRecordDatePushNotification.rawValue)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Key.january.rawValue)
+            UserDefaults.standard.synchronize()
         }
     }
     
