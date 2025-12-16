@@ -44,13 +44,19 @@ class APIClient {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NetworkError.badResponse(statusCode: -1, rawBody: nil)
         }
-        
-        if !(200...299).contains(httpResponse.statusCode) {
-            let rawBody = String(data: data, encoding: .utf8)
-            // MARK: - デバッグ情報はここで出力
-            print("❌ StatusCode: \(httpResponse.statusCode), Raw Body: \(rawBody ?? "N/A")")
-            throw NetworkError.badResponse(statusCode: httpResponse.statusCode, rawBody: rawBody)
+                
+        if let rawBody = String(data: data, encoding: .utf8) {
+            if (200...299).contains(httpResponse.statusCode) {
+                print("✅ API Success (StatusCode: \(httpResponse.statusCode))")
+//                print("➡️ Raw JSON Body:")
+//                print(rawBody)
+            } else {
+                // 失敗時のエラー出力 (既存のコード)
+                print("❌ StatusCode: \(httpResponse.statusCode), Raw Body: \(rawBody)")
+                throw NetworkError.badResponse(statusCode: httpResponse.statusCode, rawBody: rawBody)
+            }
         }
+        
         
         // 4. レスポンスのデコード
         do {

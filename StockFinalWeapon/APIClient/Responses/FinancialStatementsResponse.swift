@@ -11,9 +11,7 @@ struct FinancialStatementsResponse: Decodable {
     let statements: [FinancialStatement]
 }
 
-struct FinancialStatement: Codable {
-    // MARK: - Swift プロパティ (キャメルケース)
-    
+struct FinancialStatement: Decodable {
     // 日付・期間情報
     let disclosedDate: String
     let disclosedTime: String
