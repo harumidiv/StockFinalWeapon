@@ -23,12 +23,13 @@ struct JQuantsScreen: View {
                         let refreshToken = try await authClient.fetchRefreshToken(mail: email, password: password)
                         let idToken = try await authClient.fetchIdToken(refreshToken: refreshToken)
                         let stockList = try await stockClient.fetchListedInfo(idToken: idToken)
+                        let stockFilterList = filterOutETFs(listedInfo: stockList)
 //                        let finance = try await stockClient.fetchFinancialStatements(idToken: idToken, code: "372A")
                         
 //                        let price = try await stockClient.fetchDailyPrices(idToken: idToken, code: "372A")
                         
                         
-                        print(stockList[1])
+                        print(stockFilterList.count)
 //                        print("a: \(price.last!.close)")
                         
 //                        guard let financeData = finance.first, let priceData = price.last else {
@@ -43,6 +44,28 @@ struct JQuantsScreen: View {
                     }
                 }
             }
+    }
+    
+    private func filterOutETFs(listedInfo: [ListedInfo]) -> [ListedInfo] {
+        
+        let businessStocks = listedInfo.filter { info in
+            
+            // 1. 17業種コードが「99」（その他）でない
+            let isNotSector99 = info.sector17Code != "99"
+            
+            // 2. 33業種コードが「9999」（その他）でない
+            //    (ETFの場合、このフィールドがないか、9999になることが多い)
+            let isNotSector9999 = info.sector33Code != "9999"
+            
+            // 3. 市場名が「その他」ではない（補助的なフィルタリング）
+            //    現物株のみに絞る場合は追加でチェックすると良い
+            let isNotMarketOther = info.marketCodeName != "その他"
+            
+            // 株式（事業会社）と見なす条件: 17業種コードが99ではない、かつ 33業種コードが9999ではない
+            return isNotSector99 && isNotSector9999
+        }
+        
+        return businessStocks
     }
 }
 
