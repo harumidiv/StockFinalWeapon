@@ -47,16 +47,15 @@ class APIClient {
                 
         if let rawBody = String(data: data, encoding: .utf8) {
             if (200...299).contains(httpResponse.statusCode) {
-                print("✅ API Success (StatusCode: \(httpResponse.statusCode))")
+//                print("✅ API Success (StatusCode: \(httpResponse.statusCode), path: \(request.path))")
 //                print("➡️ Raw JSON Body:")
-//                print(rawBody)
+//                print("➡️\(rawBody)")
             } else {
                 // 失敗時のエラー出力 (既存のコード)
                 print("❌ StatusCode: \(httpResponse.statusCode), Raw Body: \(rawBody)")
                 throw NetworkError.badResponse(statusCode: httpResponse.statusCode, rawBody: rawBody)
             }
         }
-        
         
         // 4. レスポンスのデコード
         do {

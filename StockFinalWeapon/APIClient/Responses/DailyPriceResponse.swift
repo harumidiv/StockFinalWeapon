@@ -12,12 +12,12 @@ struct DailyPriceResponse: Decodable {
 }
 
 struct DailyQuote: Decodable {
-    let code: String
-    let date: String
-    let open: Double
-    let high: Double
-    let low: Double
-    let close: Double
+    let code: String?
+    let date: String?
+    let open: Double?
+    let high: Double?
+    let low: Double?
+    let close: Double?
     let volume: Double?
     
     private enum CodingKeys: String, CodingKey {

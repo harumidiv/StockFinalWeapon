@@ -28,7 +28,7 @@ class StockClient {
     ///   - idToken: idToken
     ///   - code: 銘柄コード
     /// - Returns: 財務情報
-    func fetchFinancialStatements(idToken: String, code: String) async throws -> [FinancialStatement] {
+    func fetchFinancialStatements(idToken: String, code: String) async throws -> [FinancialStatement]? {
         let request = FinancialStatementsRequest(idToken: idToken, code: code)
         let response = try await client.send(request)
         return response.statements
