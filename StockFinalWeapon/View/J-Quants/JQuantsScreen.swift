@@ -23,22 +23,19 @@ struct JQuantsScreen: View {
                         let refreshToken = try await authClient.fetchRefreshToken(mail: email, password: password)
                         let idToken = try await authClient.fetchIdToken(refreshToken: refreshToken)
                         let stockList = try await stockClient.fetchListedInfo(idToken: idToken)
-                        let finance = try await stockClient.fetchFinancialStatements(idToken: idToken, code: stockList[0].Code)
+                        let finance = try await stockClient.fetchFinancialStatements(idToken: idToken, code: "372A")
                         
-                        let price = try await stockClient.fetchDailyPrices(idToken: idToken, code: stockList[0].Code)
+                        let price = try await stockClient.fetchDailyPrices(idToken: idToken, code: "372A")
                         
                         print("a: \(price.last!.close)")
-
                         
-                        print("date: \(finance.last!.disclosedDate)")
-                        
-                        guard let financeData = finance.last, let priceData = price.last else {
+                        guard let financeData = finance.first, let priceData = price.last else {
                             return
                         }
                         
-//                        let fcf = Int(financeData.CashFlowsFromOperatingActivities ?? "0")! + Int(financeData.CashFlowsFromInvestingActivities ?? "0")!
-                        let marketCap = Double(financeData.numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock ?? "0")! * priceData.close
-                        print("🐈: \(marketCap)")
+                        let fcf = Double(financeData.cashFlowsFromOperatingActivities)! + Double(financeData.cashFlowsFromInvestingActivities)!
+                        let marketCap = Double(financeData.numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock)! * priceData.close
+                        print("🐈: \(fcf / marketCap * 100)")
                     } catch {
                         print("エラーが発生しました: \(error.localizedDescription)")
                     }

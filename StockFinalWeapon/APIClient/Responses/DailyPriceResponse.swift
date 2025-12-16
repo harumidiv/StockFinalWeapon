@@ -21,7 +21,6 @@ struct DailyQuote: Decodable {
     let volume: Double?
     
     private enum CodingKeys: String, CodingKey {
-        // Swiftプロパティ名: JSONキー名
         case code = "Code"
         case date = "Date"
         case open = "Open"

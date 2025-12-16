@@ -12,7 +12,13 @@ struct ListedInfoResponse: Decodable {
 }
 
 struct ListedInfo: Decodable {
-    let Code: String
-    let CompanyName: String
-    let MarketCode: String?
+    let code: String
+    let companyName: String
+    let marketCode: String?
+    
+    private enum CodingKeys: String, CodingKey {
+        case code = "Code"
+        case companyName = "CompanyName"
+        case marketCode = "MarketCode"
+    }
 }

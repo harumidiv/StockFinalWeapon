@@ -15,143 +15,143 @@ struct FinancialStatement: Codable {
     // MARK: - Swift プロパティ (キャメルケース)
     
     // 日付・期間情報
-    let disclosedDate: String?
-    let disclosedTime: String?
-    let localCode: String?
-    let disclosureNumber: String?
-    let typeOfDocument: String?
-    let typeOfCurrentPeriod: String?
-    let currentPeriodStartDate: String?
-    let currentPeriodEndDate: String?
-    let currentFiscalYearStartDate: String?
-    let currentFiscalYearEndDate: String?
-    let nextFiscalYearStartDate: String?
-    let nextFiscalYearEndDate: String?
+    let disclosedDate: String
+    let disclosedTime: String
+    let localCode: String
+    let disclosureNumber: String
+    let typeOfDocument: String
+    let typeOfCurrentPeriod: String
+    let currentPeriodStartDate: String
+    let currentPeriodEndDate: String
+    let currentFiscalYearStartDate: String
+    let currentFiscalYearEndDate: String
+    let nextFiscalYearStartDate: String
+    let nextFiscalYearEndDate: String
     
     // 実績値 (Current Period Results)
-    let netSales: String?
-    let operatingProfit: String?
-    let ordinaryProfit: String?
-    let profit: String?
-    let earningsPerShare: String?
-    let dilutedEarningsPerShare: String?
-    let totalAssets: String?
-    let equity: String?
-    let equityToAssetRatio: String?
-    let bookValuePerShare: String?
-    let cashFlowsFromOperatingActivities: String?
-    let cashFlowsFromInvestingActivities: String?
-    let cashFlowsFromFinancingActivities: String?
-    let cashAndEquivalents: String?
+    let netSales: String
+    let operatingProfit: String
+    let ordinaryProfit: String
+    let profit: String
+    let earningsPerShare: String
+    let dilutedEarningsPerShare: String
+    let totalAssets: String
+    let equity: String
+    let equityToAssetRatio: String
+    let bookValuePerShare: String
+    let cashFlowsFromOperatingActivities: String
+    let cashFlowsFromInvestingActivities: String
+    let cashFlowsFromFinancingActivities: String
+    let cashAndEquivalents: String
     
     // 配当実績 (Result Dividend)
-    let resultDividendPerShare1stQuarter: String?
-    let resultDividendPerShare2ndQuarter: String?
-    let resultDividendPerShare3rdQuarter: String?
-    let resultDividendPerShareFiscalYearEnd: String?
-    let resultDividendPerShareAnnual: String?
-    let distributionsPerUnit_REIT: String? // JSON: DistributionsPerUnit(REIT)
-    let resultTotalDividendPaidAnnual: String?
-    let resultPayoutRatioAnnual: String?
+    let resultDividendPerShare1stQuarter: String
+    let resultDividendPerShare2ndQuarter: String
+    let resultDividendPerShare3rdQuarter: String
+    let resultDividendPerShareFiscalYearEnd: String
+    let resultDividendPerShareAnnual: String
+    let distributionsPerUnit_REIT: String // JSON: DistributionsPerUnit(REIT)
+    let resultTotalDividendPaidAnnual: String
+    let resultPayoutRatioAnnual: String
     
     // 配当予想 (Forecast Dividend)
-    let forecastDividendPerShare1stQuarter: String?
-    let forecastDividendPerShare2ndQuarter: String?
-    let forecastDividendPerShare3rdQuarter: String?
-    let forecastDividendPerShareFiscalYearEnd: String?
-    let forecastDividendPerShareAnnual: String?
-    let forecastDistributionsPerUnit_REIT: String? // JSON: ForecastDistributionsPerUnit(REIT)
-    let forecastTotalDividendPaidAnnual: String?
-    let forecastPayoutRatioAnnual: String?
+    let forecastDividendPerShare1stQuarter: String
+    let forecastDividendPerShare2ndQuarter: String
+    let forecastDividendPerShare3rdQuarter: String
+    let forecastDividendPerShareFiscalYearEnd: String
+    let forecastDividendPerShareAnnual: String
+    let forecastDistributionsPerUnit_REIT: String // JSON: ForecastDistributionsPerUnit(REIT)
+    let forecastTotalDividendPaidAnnual: String
+    let forecastPayoutRatioAnnual: String
     
     // 翌年配当予想 (Next Year Forecast Dividend)
-    let nextYearForecastDividendPerShare1stQuarter: String?
-    let nextYearForecastDividendPerShare2ndQuarter: String?
-    let nextYearForecastDividendPerShare3rdQuarter: String?
-    let nextYearForecastDividendPerShareFiscalYearEnd: String?
-    let nextYearForecastDividendPerShareAnnual: String?
-    let nextYearForecastDistributionsPerUnit_REIT: String? // JSON: NextYearForecastDistributionsPerUnit(REIT)
-    let nextYearForecastPayoutRatioAnnual: String?
+    let nextYearForecastDividendPerShare1stQuarter: String
+    let nextYearForecastDividendPerShare2ndQuarter: String
+    let nextYearForecastDividendPerShare3rdQuarter: String
+    let nextYearForecastDividendPerShareFiscalYearEnd: String
+    let nextYearForecastDividendPerShareAnnual: String
+    let nextYearForecastDistributionsPerUnit_REIT: String // JSON: NextYearForecastDistributionsPerUnit(REIT)
+    let nextYearForecastPayoutRatioAnnual: String
     
     // 業績予想 (Forecasts)
-    let forecastNetSales2ndQuarter: String?
-    let forecastOperatingProfit2ndQuarter: String?
-    let forecastOrdinaryProfit2ndQuarter: String?
-    let forecastProfit2ndQuarter: String?
-    let forecastEarningsPerShare2ndQuarter: String?
+    let forecastNetSales2ndQuarter: String
+    let forecastOperatingProfit2ndQuarter: String
+    let forecastOrdinaryProfit2ndQuarter: String
+    let forecastProfit2ndQuarter: String
+    let forecastEarningsPerShare2ndQuarter: String
     
     // 翌年業績予想 (Next Year Forecasts)
-    let nextYearForecastNetSales2ndQuarter: String?
-    let nextYearForecastOperatingProfit2ndQuarter: String?
-    let nextYearForecastOrdinaryProfit2ndQuarter: String?
-    let nextYearForecastProfit2ndQuarter: String?
-    let nextYearForecastEarningsPerShare2ndQuarter: String?
+    let nextYearForecastNetSales2ndQuarter: String
+    let nextYearForecastOperatingProfit2ndQuarter: String
+    let nextYearForecastOrdinaryProfit2ndQuarter: String
+    let nextYearForecastProfit2ndQuarter: String
+    let nextYearForecastEarningsPerShare2ndQuarter: String
     
     // 通期業績予想 (Full Year Forecasts)
-    let forecastNetSales: String?
-    let forecastOperatingProfit: String?
-    let forecastOrdinaryProfit: String?
-    let forecastProfit: String?
-    let forecastEarningsPerShare: String?
+    let forecastNetSales: String
+    let forecastOperatingProfit: String
+    let forecastOrdinaryProfit: String
+    let forecastProfit: String
+    let forecastEarningsPerShare: String
     
     // 翌年通期業績予想 (Next Year Full Year Forecasts)
-    let nextYearForecastNetSales: String?
-    let nextYearForecastOperatingProfit: String?
-    let nextYearForecastOrdinaryProfit: String?
-    let nextYearForecastProfit: String?
-    let nextYearForecastEarningsPerShare: String?
+    let nextYearForecastNetSales: String
+    let nextYearForecastOperatingProfit: String
+    let nextYearForecastOrdinaryProfit: String
+    let nextYearForecastProfit: String
+    let nextYearForecastEarningsPerShare: String
     
     // 会計情報 (Accounting Info)
-    let materialChangesInSubsidiaries: String?
-    let significantChangesInTheScopeOfConsolidation: String?
-    let changesBasedOnRevisionsOfAccountingStandard: String?
-    let changesOtherThanOnesBasedOnRevisionsOfAccountingStandard: String?
-    let changesInAccountingEstimates: String?
-    let retrospectiveRestatement: String?
+    let materialChangesInSubsidiaries: String
+    let significantChangesInTheScopeOfConsolidation: String
+    let changesBasedOnRevisionsOfAccountingStandard: String
+    let changesOtherThanOnesBasedOnRevisionsOfAccountingStandard: String
+    let changesInAccountingEstimates: String
+    let retrospectiveRestatement: String
     
     // 株式情報 (Share Info)
-    let numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock: String?
-    let numberOfTreasuryStockAtTheEndOfFiscalYear: String?
-    let averageNumberOfShares: String?
+    let numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock: String
+    let numberOfTreasuryStockAtTheEndOfFiscalYear: String
+    let averageNumberOfShares: String
     
     // 非連結情報 (Non-Consolidated Info)
-    let nonConsolidatedNetSales: String?
-    let nonConsolidatedOperatingProfit: String?
-    let nonConsolidatedOrdinaryProfit: String?
-    let nonConsolidatedProfit: String?
-    let nonConsolidatedEarningsPerShare: String?
-    let nonConsolidatedTotalAssets: String?
-    let nonConsolidatedEquity: String?
-    let nonConsolidatedEquityToAssetRatio: String?
-    let nonConsolidatedBookValuePerShare: String?
+    let nonConsolidatedNetSales: String
+    let nonConsolidatedOperatingProfit: String
+    let nonConsolidatedOrdinaryProfit: String
+    let nonConsolidatedProfit: String
+    let nonConsolidatedEarningsPerShare: String
+    let nonConsolidatedTotalAssets: String
+    let nonConsolidatedEquity: String
+    let nonConsolidatedEquityToAssetRatio: String
+    let nonConsolidatedBookValuePerShare: String
     
     // 非連結業績予想 (Non-Consolidated Forecasts)
-    let forecastNonConsolidatedNetSales2ndQuarter: String?
-    let forecastNonConsolidatedOperatingProfit2ndQuarter: String?
-    let forecastNonConsolidatedOrdinaryProfit2ndQuarter: String?
-    let forecastNonConsolidatedProfit2ndQuarter: String?
-    let forecastNonConsolidatedEarningsPerShare2ndQuarter: String?
+    let forecastNonConsolidatedNetSales2ndQuarter: String
+    let forecastNonConsolidatedOperatingProfit2ndQuarter: String
+    let forecastNonConsolidatedOrdinaryProfit2ndQuarter: String
+    let forecastNonConsolidatedProfit2ndQuarter: String
+    let forecastNonConsolidatedEarningsPerShare2ndQuarter: String
     
     // 翌年非連結業績予想 (Next Year Non-Consolidated Forecasts)
-    let nextYearForecastNonConsolidatedNetSales2ndQuarter: String?
-    let nextYearForecastNonConsolidatedOperatingProfit2ndQuarter: String?
-    let nextYearForecastNonConsolidatedOrdinaryProfit2ndQuarter: String?
-    let nextYearForecastNonConsolidatedProfit2ndQuarter: String?
-    let nextYearForecastNonConsolidatedEarningsPerShare2ndQuarter: String?
+    let nextYearForecastNonConsolidatedNetSales2ndQuarter: String
+    let nextYearForecastNonConsolidatedOperatingProfit2ndQuarter: String
+    let nextYearForecastNonConsolidatedOrdinaryProfit2ndQuarter: String
+    let nextYearForecastNonConsolidatedProfit2ndQuarter: String
+    let nextYearForecastNonConsolidatedEarningsPerShare2ndQuarter: String
     
     // 非連結通期予想 (Non-Consolidated Full Year Forecasts)
-    let forecastNonConsolidatedNetSales: String?
-    let forecastNonConsolidatedOperatingProfit: String?
-    let forecastNonConsolidatedOrdinaryProfit: String?
-    let forecastNonConsolidatedProfit: String?
-    let forecastNonConsolidatedEarningsPerShare: String?
+    let forecastNonConsolidatedNetSales: String
+    let forecastNonConsolidatedOperatingProfit: String
+    let forecastNonConsolidatedOrdinaryProfit: String
+    let forecastNonConsolidatedProfit: String
+    let forecastNonConsolidatedEarningsPerShare: String
     
     // 翌年非連結通期予想 (Next Year Non-Consolidated Full Year Forecasts)
-    let nextYearForecastNonConsolidatedNetSales: String?
-    let nextYearForecastNonConsolidatedOperatingProfit: String?
-    let nextYearForecastNonConsolidatedOrdinaryProfit: String?
-    let nextYearForecastNonConsolidatedProfit: String?
-    let nextYearForecastNonConsolidatedEarningsPerShare: String?
+    let nextYearForecastNonConsolidatedNetSales: String
+    let nextYearForecastNonConsolidatedOperatingProfit: String
+    let nextYearForecastNonConsolidatedOrdinaryProfit: String
+    let nextYearForecastNonConsolidatedProfit: String
+    let nextYearForecastNonConsolidatedEarningsPerShare: String
     
     // MARK: - CodingKeys (マッピング定義)
     private enum CodingKeys: String, CodingKey {
