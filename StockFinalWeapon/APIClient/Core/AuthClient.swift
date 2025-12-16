@@ -21,9 +21,9 @@ class AuthClient {
         return response.refreshToken
     }
     
-//    func fetchIdToken(refreshToken: String) async throws -> String {
-//        let request = IdTokenRequest(refreshToken: refreshToken)
-//        let response = try await client.send(request)
-//        return response.idToken
-//    }
+    func fetchIdToken(refreshToken: String) async throws -> String {
+        let request = IdTokenRequest(refreshToken: refreshToken)
+        let response = try await client.send(request)
+        return response.idToken
+    }
 }

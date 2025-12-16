@@ -26,14 +26,6 @@ struct Credentials: Encodable {
     let password: String
 }
 
-//struct RefreshTokenResponse: Decodable {
-//    let refreshToken: String
-//}
-
-struct IdTokenResponse: Decodable {
-    let idToken: String
-}
-
 struct JQuantsScreen: View {
     let apiClient = APIClient()
 
@@ -48,11 +40,9 @@ struct JQuantsScreen: View {
                         
                         let authClient = AuthClient(client: apiClient)
                         let refreshToken = try await authClient.fetchRefreshToken(mail: email, password: password)
-                        
-//                        let refreshToken = try await fetchRefreshToken(mail: email, password: password)
-                        let idToken = try await fetchIdToken(refreshToken: refreshToken)
+                        let idToken = try await authClient.fetchIdToken(refreshToken: refreshToken)
+                
                         let stockList = try await fetchListedInfo(idToken: idToken)
-                        
                         let finance = try await fetchFinancialStatements(idToken: idToken, code: stockList[0].Code)
                         
                         let fcf = Int(finance[0].CashFlowsFromOperatingActivities ?? "0")! - Int(finance[0].CashFlowsFromInvestingActivities ?? "0")!
