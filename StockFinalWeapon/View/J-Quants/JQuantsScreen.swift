@@ -27,17 +27,17 @@ struct JQuantsScreen: View {
                         
                         let price = try await stockClient.fetchDailyPrices(idToken: idToken, code: stockList[0].Code)
                         
-                        print("a: \(price.last!.Close)")
+                        print("a: \(price.last!.close)")
 
                         
-                        print("date: \(finance.last!.DisclosedDate)")
+                        print("date: \(finance.last!.disclosedDate)")
                         
                         guard let financeData = finance.last, let priceData = price.last else {
                             return
                         }
                         
 //                        let fcf = Int(financeData.CashFlowsFromOperatingActivities ?? "0")! + Int(financeData.CashFlowsFromInvestingActivities ?? "0")!
-                        let marketCap = Double(financeData.NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock ?? "0")! * priceData.Close
+                        let marketCap = Double(financeData.numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock ?? "0")! * priceData.close
                         print("🐈: \(marketCap)")
                     } catch {
                         print("エラーが発生しました: \(error.localizedDescription)")
