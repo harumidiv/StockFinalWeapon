@@ -17,7 +17,6 @@ struct JQuantsScreen: View {
                 
                 Task {
                     do {
-                        
                         let authClient = AuthClient(client: apiClient)
                         let stockClient = StockClient(client: apiClient)
                         
@@ -25,10 +24,20 @@ struct JQuantsScreen: View {
                         let idToken = try await authClient.fetchIdToken(refreshToken: refreshToken)
                         let stockList = try await stockClient.fetchListedInfo(idToken: idToken)
                         let finance = try await stockClient.fetchFinancialStatements(idToken: idToken, code: stockList[0].Code)
+                        
+                        let price = try await stockClient.fetchDailyPrices(idToken: idToken, code: stockList[0].Code)
+                        
+                        print("a: \(price.last!.Close)")
 
                         
-                        let fcf = Int(finance[0].CashFlowsFromOperatingActivities ?? "0")! - Int(finance[0].CashFlowsFromInvestingActivities ?? "0")!
-                        let marketCap = Int(finance[0].NetSales ?? "0")! / fcf * 100
+                        print("date: \(finance.last!.DisclosedDate)")
+                        
+                        guard let financeData = finance.last, let priceData = price.last else {
+                            return
+                        }
+                        
+//                        let fcf = Int(financeData.CashFlowsFromOperatingActivities ?? "0")! + Int(financeData.CashFlowsFromInvestingActivities ?? "0")!
+                        let marketCap = Double(financeData.NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock ?? "0")! * priceData.Close
                         print("🐈: \(marketCap)")
                     } catch {
                         print("エラーが発生しました: \(error.localizedDescription)")
