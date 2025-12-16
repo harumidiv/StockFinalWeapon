@@ -8,7 +8,7 @@
 import Foundation
 
 // MARK: - RefreshTokenRequest (メールとパスワードでリフレッシュトークンを取得)
-struct RefreshTokenRequest: APIRequest, Decodable {
+struct RefreshTokenRequest: APIRequest {
     typealias Response = RefreshTokenResponse
     
     let mail: String
