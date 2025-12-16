@@ -26,15 +26,17 @@ struct Credentials: Encodable {
     let password: String
 }
 
-struct RefreshTokenResponse: Decodable {
-    let refreshToken: String
-}
+//struct RefreshTokenResponse: Decodable {
+//    let refreshToken: String
+//}
 
 struct IdTokenResponse: Decodable {
     let idToken: String
 }
 
 struct JQuantsScreen: View {
+    let apiClient = APIClient()
+
     var body: some View {
         Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
             .task {
@@ -44,7 +46,10 @@ struct JQuantsScreen: View {
                 Task {
                     do {
                         
-                        let refreshToken = try await fetchRefreshToken(mail: email, password: password)
+                        let authClient = AuthClient(client: apiClient)
+                        let refreshToken = try await authClient.fetchRefreshToken(mail: email, password: password)
+                        
+//                        let refreshToken = try await fetchRefreshToken(mail: email, password: password)
                         let idToken = try await fetchIdToken(refreshToken: refreshToken)
                         let stockList = try await fetchListedInfo(idToken: idToken)
                         
