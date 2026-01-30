@@ -12,6 +12,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case trailing
     case ipo
     case jQuants
+    case momentam
     case mypage
     
     var id: Self { self }
@@ -22,6 +23,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .trailing: return "トレイリング"
         case .ipo: return "IPO"
         case .jQuants: return "JQuants"
+        case .momentam: return "モメンタム"
         case .mypage: return "マイページ"
         }
     }
@@ -32,6 +34,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .trailing: return "waveform.path.ecg"
         case .ipo: return "sparkles"
         case .jQuants: return "chart.bar.fill"
+        case .momentam: return "bolt.fill"
         case .mypage: return "person.fill"
         }
     }
@@ -69,6 +72,12 @@ struct HomeTabView: View {
                         }
                         .tag(AppTab.jQuants)
                     
+                case .momentam:
+                    MomentamRankingScreen()
+                        .tabItem {
+                            Label(AppTab.momentam.title, systemImage: AppTab.momentam.icon)
+                        }
+                        .tag(AppTab.momentam)
                 case .mypage:
                     MypageScreen()
                         .tabItem {

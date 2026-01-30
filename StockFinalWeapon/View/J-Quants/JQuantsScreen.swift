@@ -6,6 +6,12 @@
 
 import SwiftUI
 
+struct FCFStockInfo {
+    let stock: ListedInfo
+    let financials: FinancialStatement
+    
+}
+
 struct JQuantsScreen: View {
     let apiClient = APIClient()
     
@@ -25,11 +31,12 @@ struct JQuantsScreen: View {
                     let stockList = try await stockClient.fetchListedInfo(idToken: idToken)
                     let stockFilterList = filterOutETFs(listedInfo: stockList)
                     
+                    
+                    var highFCFList: [FCFStockInfo] = []
+                    
                     for stock in stockFilterList {
                         let code = stock.code
-                        let name = stock.companyName // 会社名も取得しておくと見やすい
-
-                        print(code + name)
+                        let name = stock.companyName
                         
                         // 銘柄コード、財務情報、株価データを並列取得
                         let (financeResult, priceResult) = try await (
@@ -39,12 +46,25 @@ struct JQuantsScreen: View {
                         
                         // 最新の財務データと株価データを安全に取得
                         guard let financeResult,
-                            let financeData = financeResult.last,
                               let priceData = priceResult.last else {
                             // 財務データまたは株価データがない場合はスキップ
                             print("--- \(code) \(name): ⚠️ 必要なデータが見つかりませんでした。スキップします。")
                             continue
                         }
+                        
+                        guard let financeData = financeResult
+                            .reversed()
+                            .first(where: {
+                                toDouble($0.cashFlowsFromOperatingActivities) != nil &&
+                                toDouble($0.cashFlowsFromInvestingActivities) != nil &&
+                                toDouble($0.numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock) != nil &&
+                                toDouble($0.numberOfTreasuryStockAtTheEndOfFiscalYear) != nil
+                            }) else {
+
+                            print("--- \(code) \(name): ⚠️ CFが入っている財務データが見つかりません")
+                            continue
+                        }
+                        
                         
                         // 4. FCF利回り計算に必要なデータの安全な数値変換
                         
@@ -62,22 +82,29 @@ struct JQuantsScreen: View {
                             continue
                         }
                         
-                        // 終値
-                        let closingPrice = priceData.close // Double型と仮定
-                        
                         // 5. FCF利回りの計算
                         
                         let fcf = operatingCF + investingCF
                         let outstandingShares = issuedShares - treasuryShares
+                        if outstandingShares <= 0 {
+                            continue
+                        }
                         
+                        // 終値
+                        let closingPrice = priceData.close // Double型と仮定
                         // 時価総額 = 流通株式数 × 株価
                         let marketCap = outstandingShares * (closingPrice ?? 0)
                         
                         // FCF利回り = (FCF / 時価総額) × 100
-                            let fcfYield = (fcf / marketCap) * 100
-                            print("--- \(code) \(name): 💰 FCF利回り: \(String(format: "%.2f", fcfYield))%")
+                        let fcfYield = (fcf / marketCap) * 100
+                        print("--- \(code) \(name): 💰 FCF利回り: \(String(format: "%.2f", fcfYield))%")
+                        
+                        if fcfYield > 10.0 {
+                            highFCFList.append(.init(stock: stock, financials: financeData))
+                        }
                     }
                     
+                    print(highFCFList.count)
     
                     
                     // 📝 編集前のコード
@@ -99,6 +126,17 @@ struct JQuantsScreen: View {
                     print("エラーが発生しました: \(error.localizedDescription)")
                 }
             }
+    }
+    
+    func toDouble(_ value: String?) -> Double? {
+        guard let value = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              value != "-",
+              value != "－" else {
+            return nil
+        }
+        return Double(value)
     }
     
     private func filterOutETFs(listedInfo: [ListedInfo]) -> [ListedInfo] {
