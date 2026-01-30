@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftSoup
 import Combine
+import SafariServices
 
 // モデル構造体
 struct MomentumStockInfo: Identifiable {
@@ -16,6 +17,7 @@ struct MomentumStockInfo: Identifiable {
     let name: String
     let price: Int // 現在値
     let open: Int  // 始値
+    let url: String
     
     // 騰落率（％）を計算するプロパティ
     var changePercentage: Double {
@@ -106,8 +108,9 @@ class StockViewModel: ObservableObject {
                 }
             }
             
+            let linkCharturl = urlString + "/chart?frm=1mntly&trm=1d&scl=stndrd&styl=lne&evnts=volume&ovrIndctr=sma%2Cmma%2Clma&addIndctr=&compare="
             // 全て揃ったら構造体を返す
-            return MomentumStockInfo(code: code, name: name, price: price, open: openPrice)
+            return MomentumStockInfo(code: code, name: name, price: price, open: openPrice, url: linkCharturl)
             
         } catch {
             print("\(code) の詳細取得に失敗: \(error)")
@@ -146,45 +149,47 @@ struct MomentamRankingScreen: View {
                         Text("上位銘柄の詳細データを解析中...")
                             .font(.subheadline)
                             .foregroundColor(.gray)
-                        
-                        Text("アクセス制限を避けるためゆっくり取得しています")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
                     }
                 } else {
-                    // 2. 読み込み完了後のリスト表示
-                    List(viewModel.stocks) { stock in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(stock.name)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .lineLimit(1)
-                                Text(stock.code)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundColor(.secondary)
+                    
+                    ScrollView {
+                        ForEach(viewModel.stocks) {stock in
+                            Link(destination: URL(string: stock.url)!) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(stock.name)
+                                            .font(.system(size: 16, weight: .bold))
+                                            .lineLimit(1)
+                                        Text(stock.code)
+                                            .font(.system(size: 12, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    VStack(alignment: .trailing, spacing: 4) {
+                                        Text("\(stock.price)円")
+                                            .font(.system(size: 16, weight: .medium))
+                                        
+                                        // 騰落率のバッジ風表示
+                                        Text(String(format: "%+.2f%%", stock.changePercentage))
+                                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 6)
+                                                    .fill(stock.changePercentage >= 0 ? Color.red : Color.blue)
+                                            )
+                                    }
+                                }
+                                .padding(.vertical, 4)
                             }
-                            
-                            Spacer()
-                            
-                            VStack(alignment: .trailing, spacing: 4) {
-                                Text("\(stock.price)円")
-                                    .font(.system(size: 16, weight: .medium))
-                                
-                                // 騰落率のバッジ風表示
-                                Text(String(format: "%+.2f%%", stock.changePercentage))
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .fill(stock.changePercentage >= 0 ? Color.red : Color.blue)
-                                    )
-                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .openURLInSafariView()
+                            .padding()
                         }
-                        .padding(.vertical, 4)
                     }
-                    .listStyle(PlainListStyle()) // 見やすいプレーンなリスト
                 }
             }
             .navigationTitle("Momentum")
