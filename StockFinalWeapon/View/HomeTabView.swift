@@ -66,7 +66,7 @@ struct HomeTabView: View {
                         .tag(AppTab.ipo)
                     
                 case .jQuants:
-                    JQuantsScreen()
+                    Sector33SelectScreen()
                         .tabItem {
                             Label(AppTab.jQuants.title, systemImage: AppTab.jQuants.icon)
                         }

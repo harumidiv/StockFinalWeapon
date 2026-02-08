@@ -15,14 +15,15 @@ struct FCFStockInfo: Identifiable {
 }
 
 struct JQuantsScreen: View {
+    let selectedSector: Sector33
+
     let apiClient = APIClient()
     @State private var highFCFList: [FCFStockInfo] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    
+
     var body: some View {
-        NavigationStack {
-            ZStack {
+        ZStack {
                 if isLoading {
                     VStack(spacing: 20) {
                         ProgressView()
@@ -47,7 +48,7 @@ struct JQuantsScreen: View {
                         Image(systemName: "doc.text.magnifyingglass")
                             .font(.system(size: 50))
                             .foregroundColor(.gray)
-                        Text("FCF利回り10%超の銘柄が見つかりませんでした")
+                        Text("FCF利回り8%以上の銘柄が見つかりませんでした")
                             .foregroundColor(.secondary)
                     }
                 } else {
@@ -84,15 +85,14 @@ struct JQuantsScreen: View {
                     }
                     .listStyle(.plain)
                 }
-            }
-            .navigationTitle("高FCF利回り銘柄")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Text("\(highFCFList.count)銘柄")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+        }
+        .navigationTitle(selectedSector.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Text("\(highFCFList.count)銘柄")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .task {
@@ -110,11 +110,20 @@ struct JQuantsScreen: View {
                 let idToken = try await authClient.fetchIdToken(refreshToken: refreshToken)
                 
                 let stockList = try await stockClient.fetchListedInfo(idToken: idToken)
-                let stockFilterList = filterOutETFs(listedInfo: stockList)
-                
+
+                // 選択した業種でフィルタリング
+                let filteredStocks = stockList.filter { stock in
+                    stock.sector33Code == selectedSector.code &&
+                    stock.sector17Code != "99" &&
+                    (stock.marketCode == "0111" || stock.marketCode == "0112" || stock.marketCode == "0113")
+                }
+
+                print("選択業種: \(selectedSector.name) (\(selectedSector.code))")
+                print("フィルタ後銘柄数: \(filteredStocks.count)")
+
                 var tempHighFCFList: [FCFStockInfo] = []
-                
-                for stock in stockFilterList {
+
+                for stock in filteredStocks {
                     let code = stock.code
                     let name = stock.companyName
                     
@@ -179,7 +188,7 @@ struct JQuantsScreen: View {
                     let fcfYield = (fcf / marketCap) * 100
                     print("--- \(code) \(name): 💰 FCF利回り: \(String(format: "%.2f", fcfYield))%")
                     
-                    if fcfYield > 10.0 {
+                    if fcfYield >= 8.0 {
                         tempHighFCFList.append(.init(
                             stock: stock,
                             financials: financeData,
@@ -264,5 +273,5 @@ struct JQuantsScreen: View {
 }
 
 #Preview {
-    JQuantsScreen()
+    JQuantsScreen(selectedSector: Sector33(code: "0050", name: "水産・農林業"))
 }
