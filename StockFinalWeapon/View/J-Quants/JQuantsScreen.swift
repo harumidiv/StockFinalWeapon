@@ -5,6 +5,7 @@
 //  Created by Harumi Sagawa on 2025/12/16.
 
 import SwiftUI
+import UIKit
 
 struct FCFStockInfo: Identifiable {
     let id = UUID()
@@ -21,6 +22,13 @@ struct JQuantsScreen: View {
     @State private var highFCFList: [FCFStockInfo] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+
+    // FCF利回りの平均値を計算
+    private var averageFCFYield: Double {
+        guard !highFCFList.isEmpty else { return 0.0 }
+        let total = highFCFList.reduce(0.0) { $0 + $1.fcfYield }
+        return total / Double(highFCFList.count)
+    }
 
     var body: some View {
         ZStack {
@@ -52,56 +60,84 @@ struct JQuantsScreen: View {
                             .foregroundColor(.secondary)
                     }
                 } else {
-                    List(highFCFList) { item in
-                        VStack(alignment: .leading, spacing: 8) {
+                    List {
+                        // 統計情報セクション
+                        Section {
                             HStack {
-                                Text(item.stock.code)
-                                    .font(.headline)
-                                    .foregroundColor(.blue)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("対象銘柄数")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(highFCFList.count)銘柄")
+                                        .font(.title3)
+                                        .fontWeight(.semibold)
+                                }
+
                                 Spacer()
-                                Text("\(String(format: "%.2f", item.fcfYield))%")
-                                    .font(.title2)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(fcfYieldColor(item.fcfYield))
+
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    Text("平均FCF利回り")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(String(format: "%.2f", averageFCFYield))%")
+                                        .font(.title3)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.blue)
+                                }
                             }
-                            
-                            Text(item.stock.companyName)
-                                .font(.subheadline)
-                                .foregroundColor(.primary)
-                            
-                            HStack {
-                                Label("\(String(format: "%.0f", item.closingPrice))円", systemImage: "yensign.circle")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                Text("・")
-                                    .foregroundColor(.secondary)
-                                Text(item.stock.sector33CodeName)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                            .padding(.vertical, 8)
+                        }
+
+                        // 銘柄リスト
+                        Section(header: Text("FCF利回り8%以上の銘柄")) {
+                            ForEach(highFCFList) { item in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text(item.stock.code)
+                                            .font(.headline)
+                                            .foregroundColor(.blue)
+                                        Spacer()
+                                        Text("\(String(format: "%.2f", item.fcfYield))%")
+                                            .font(.title2)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(fcfYieldColor(item.fcfYield))
+                                    }
+
+                                    Text(item.stock.companyName)
+                                        .font(.subheadline)
+                                        .foregroundColor(.primary)
+
+                                    HStack {
+                                        Label("\(String(format: "%.0f", item.closingPrice))円", systemImage: "yensign.circle")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+
+                                        Text("・")
+                                            .foregroundColor(.secondary)
+                                        Text(item.stock.sector33CodeName)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .padding(.vertical, 4)
                             }
                         }
-                        .padding(.vertical, 4)
                     }
-                    .listStyle(.plain)
+                    .listStyle(.insetGrouped)
                 }
         }
         .navigationTitle(selectedSector.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Text("\(highFCFList.count)銘柄")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
         .task {
             isLoading = true
             errorMessage = nil
-            
+
+            // 画面スリープを無効化（長時間通信のため）
+            UIApplication.shared.isIdleTimerDisabled = true
+
             let email = "harumi.hobby@gmail.com"
             let password = "A7kL9mQ2R8sT"
-            
+
             do {
                 let authClient = AuthClient(client: apiClient)
                 let stockClient = StockClient(client: apiClient)
@@ -188,7 +224,8 @@ struct JQuantsScreen: View {
                     let fcfYield = (fcf / marketCap) * 100
                     print("--- \(code) \(name): 💰 FCF利回り: \(String(format: "%.2f", fcfYield))%")
                     
-                    if fcfYield >= 8.0 {
+                    // FIXME: ここで正しい値に絞り込む
+                    if fcfYield >= 0 {
                         tempHighFCFList.append(.init(
                             stock: stock,
                             financials: financeData,
@@ -201,7 +238,10 @@ struct JQuantsScreen: View {
                 // FCF利回りの高い順にソート
                 highFCFList = tempHighFCFList.sorted { $0.fcfYield > $1.fcfYield }
                 isLoading = false
-                
+
+                // 画面スリープを再度有効化
+                UIApplication.shared.isIdleTimerDisabled = false
+
                 print("高FCF利回り銘柄: \(highFCFList.count)件")
                 
                 
@@ -224,6 +264,9 @@ struct JQuantsScreen: View {
                 print("エラーが発生しました: \(error.localizedDescription)")
                 errorMessage = error.localizedDescription
                 isLoading = false
+
+                // エラー時も画面スリープを再度有効化
+                UIApplication.shared.isIdleTimerDisabled = false
             }
         }
     }

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct Sector33SelectScreen: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
@@ -47,13 +48,25 @@ struct Sector33SelectScreen: View {
                                     Button(action: {
                                         path.append(sector)
                                     }) {
-                                        Text(sector.name)
-                                            .font(.caption)
-                                            .lineLimit(2)
-                                            .frame(maxWidth: .infinity, minHeight: 60)
-                                            .background(Color(.tertiarySystemBackground))
-                                            .cornerRadius(8)
-                                            .foregroundColor(.primary)
+                                        VStack(spacing: 6) {
+                                            Image(systemName: sector.icon)
+                                                .font(.system(size: 24))
+                                                .foregroundColor(.blue)
+
+                                            Text(sector.name)
+                                                .font(.caption)
+                                                .lineLimit(2)
+                                                .foregroundColor(.primary)
+                                                .multilineTextAlignment(.center)
+
+                                            Text("\(sector.stockCount)銘柄")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .frame(maxWidth: .infinity, minHeight: 90)
+                                        .padding(.vertical, 8)
+                                        .background(Color(.tertiarySystemBackground))
+                                        .cornerRadius(12)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -78,6 +91,9 @@ struct Sector33SelectScreen: View {
         isLoading = true
         errorMessage = nil
 
+        // 画面スリープを無効化
+        UIApplication.shared.isIdleTimerDisabled = true
+
         let email = "harumi.hobby@gmail.com"
         let password = "A7kL9mQ2R8sT"
 
@@ -93,12 +109,18 @@ struct Sector33SelectScreen: View {
             sectors = Sector33.extractFrom(listedInfo: stockList)
             isLoading = false
 
+            // 画面スリープを再度有効化
+            UIApplication.shared.isIdleTimerDisabled = false
+
             print("取得した業種数: \(sectors.count)")
 
         } catch {
             print("エラーが発生しました: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
             isLoading = false
+
+            // エラー時も画面スリープを再度有効化
+            UIApplication.shared.isIdleTimerDisabled = false
         }
     }
 }
