@@ -13,6 +13,19 @@ struct FCFStockInfo: Identifiable {
     let financials: FinancialStatement
     let fcfYield: Double
     let closingPrice: Double
+    let disclosedDate: String
+
+    // 開示日をyyyy/MM/dd形式にフォーマット
+    var formattedDisclosedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        if let date = formatter.date(from: disclosedDate) {
+            formatter.dateFormat = "yyyy/MM/dd"
+            return formatter.string(from: date)
+        }
+        return disclosedDate
+    }
 }
 
 struct JQuantsScreen: View {
@@ -22,13 +35,6 @@ struct JQuantsScreen: View {
     @State private var highFCFList: [FCFStockInfo] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-
-    // FCF利回りの平均値を計算
-    private var averageFCFYield: Double {
-        guard !highFCFList.isEmpty else { return 0.0 }
-        let total = highFCFList.reduce(0.0) { $0 + $1.fcfYield }
-        return total / Double(highFCFList.count)
-    }
 
     var body: some View {
         ZStack {
@@ -60,37 +66,7 @@ struct JQuantsScreen: View {
                             .foregroundColor(.secondary)
                     }
                 } else {
-                    List {
-                        // 統計情報セクション
-                        Section {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("対象銘柄数")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text("\(highFCFList.count)銘柄")
-                                        .font(.title3)
-                                        .fontWeight(.semibold)
-                                }
-
-                                Spacer()
-
-                                VStack(alignment: .trailing, spacing: 4) {
-                                    Text("平均FCF利回り")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text("\(String(format: "%.2f", averageFCFYield))%")
-                                        .font(.title3)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.blue)
-                                }
-                            }
-                            .padding(.vertical, 8)
-                        }
-
-                        // 銘柄リスト
-                        Section(header: Text("FCF利回り8%以上の銘柄")) {
-                            ForEach(highFCFList) { item in
+                    List(highFCFList) { item in
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack {
                                         Text(item.stock.code)
@@ -108,26 +84,32 @@ struct JQuantsScreen: View {
                                         .foregroundColor(.primary)
 
                                     HStack {
-                                        Label("\(String(format: "%.0f", item.closingPrice))円", systemImage: "yensign.circle")
+                                        Label(item.formattedDisclosedDate, systemImage: "calendar")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
 
                                         Text("・")
                                             .foregroundColor(.secondary)
-                                        Text(item.stock.sector33CodeName)
+
+                                        Label("\(String(format: "%.0f", item.closingPrice))円", systemImage: "yensign.circle")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                     }
                                 }
                                 .padding(.vertical, 4)
-                            }
-                        }
                     }
-                    .listStyle(.insetGrouped)
+                    .listStyle(.plain)
                 }
         }
         .navigationTitle(selectedSector.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Text("\(highFCFList.count)銘柄")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
         .task {
             isLoading = true
             errorMessage = nil
@@ -168,15 +150,14 @@ struct JQuantsScreen: View {
                         stockClient.fetchFinancialStatements(idToken: idToken, code: code),
                         stockClient.fetchDailyPrices(idToken: idToken, code: code)
                     )
-                    
-                    // 最新の財務データと株価データを安全に取得
-                    guard let financeResult,
-                          let priceData = priceResult.last else {
-                        // 財務データまたは株価データがない場合はスキップ
-                        print("--- \(code) \(name): ⚠️ 必要なデータが見つかりませんでした。スキップします。")
+
+                    // 財務データの取得確認
+                    guard let financeResult else {
+                        print("--- \(code) \(name): ⚠️ 財務データが見つかりませんでした。スキップします。")
                         continue
                     }
-                    
+
+                    // CFデータが揃っている最新の財務データを取得
                     guard let financeData = financeResult
                         .reversed()
                         .first(where: {
@@ -185,11 +166,21 @@ struct JQuantsScreen: View {
                             toDouble($0.numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock) != nil &&
                             toDouble($0.numberOfTreasuryStockAtTheEndOfFiscalYear) != nil
                         }) else {
-                        
                         print("--- \(code) \(name): ⚠️ CFが入っている財務データが見つかりません")
                         continue
                     }
-                    
+
+                    // 財務データの開示日を取得
+                    guard let disclosedDate = financeData.disclosedDate else {
+                        print("--- \(code) \(name): ⚠️ 開示日が見つかりません")
+                        continue
+                    }
+
+                    // 開示日と同じ日付の株価データを取得
+                    guard let priceData = priceResult.first(where: { $0.date == disclosedDate }) else {
+                        print("--- \(code) \(name): ⚠️ 開示日(\(disclosedDate))の株価データが見つかりません。スキップします。")
+                        continue
+                    }
                     
                     // 4. FCF利回り計算に必要なデータの安全な数値変換
                     
@@ -201,8 +192,7 @@ struct JQuantsScreen: View {
                     }
                     
                     // 発行済株式総数 - 自己株式数 = 流通株式数
-                    guard let issuedShares = Double(financeData.numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock ?? ""),
-                          let treasuryShares = Double(financeData.numberOfTreasuryStockAtTheEndOfFiscalYear ?? "") else {
+                    guard let issuedShares = Double(financeData.numberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock ?? "") else {
                         print("--- \(code) \(name): ⚠️ 株式数データの変換に失敗しました。スキップします。")
                         continue
                     }
@@ -210,19 +200,15 @@ struct JQuantsScreen: View {
                     // 5. FCF利回りの計算
                     
                     let fcf = operatingCF + investingCF
-                    let outstandingShares = issuedShares - treasuryShares
-                    if outstandingShares <= 0 {
-                        continue
-                    }
                     
                     // 終値
                     let closingPrice = priceData.close // Double型と仮定
-                    // 時価総額 = 流通株式数 × 株価
-                    let marketCap = outstandingShares * (closingPrice ?? 0)
+                    // 時価総額 = 発行済株式総数 × 株価
+                    let marketCap = issuedShares * (closingPrice ?? 0)
                     
                     // FCF利回り = (FCF / 時価総額) × 100
                     let fcfYield = (fcf / marketCap) * 100
-                    print("--- \(code) \(name): 💰 FCF利回り: \(String(format: "%.2f", fcfYield))%")
+                    print("--- \(code) \(name): 💰 FCF利回り: \(String(format: "%.2f", fcfYield))% (開示日: \(disclosedDate), 株価: \(closingPrice ?? 0)円)")
                     
                     // FIXME: ここで正しい値に絞り込む
                     if fcfYield >= 0 {
@@ -230,7 +216,8 @@ struct JQuantsScreen: View {
                             stock: stock,
                             financials: financeData,
                             fcfYield: fcfYield,
-                            closingPrice: closingPrice ?? 0
+                            closingPrice: closingPrice ?? 0,
+                            disclosedDate: disclosedDate
                         ))
                     }
                 }

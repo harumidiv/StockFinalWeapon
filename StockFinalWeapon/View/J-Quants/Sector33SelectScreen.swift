@@ -15,6 +15,7 @@ struct Sector33SelectScreen: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var path = NavigationPath()
+    @State private var stockCode: String = ""
 
     let apiClient = APIClient()
 
@@ -42,6 +43,28 @@ struct Sector33SelectScreen: View {
                     }
                 } else {
                     Form {
+                        // 銘柄コード検索セクション
+                        Section(header: Text("銘柄コードで検索")) {
+                            HStack {
+                                TextField("銘柄コード (例: 7203)", text: $stockCode)
+                                    .textFieldStyle(.roundedBorder)
+                                    .keyboardType(.asciiCapable)
+                                    .autocapitalization(.allCharacters)
+
+                                Button(action: {
+                                    if !stockCode.isEmpty {
+                                        path.append(stockCode)
+                                    }
+                                }) {
+                                    Image(systemName: "magnifyingglass")
+                                        .font(.title3)
+                                        .foregroundColor(.blue)
+                                }
+                                .disabled(stockCode.isEmpty)
+                            }
+                            .padding(.vertical, 4)
+                        }
+
                         Section(header: Text("33業種から選択")) {
                             LazyVGrid(columns: columns, spacing: 12) {
                                 ForEach(sectors) { sector in
@@ -76,10 +99,13 @@ struct Sector33SelectScreen: View {
                     }
                 }
             }
-            .navigationTitle("業種選択")
+            .navigationTitle("FCF利回り検索")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Sector33.self) { sector in
                 JQuantsScreen(selectedSector: sector)
+            }
+            .navigationDestination(for: String.self) { code in
+                SingleStockFCFScreen(stockCode: code + "0")
             }
         }
         .task {
