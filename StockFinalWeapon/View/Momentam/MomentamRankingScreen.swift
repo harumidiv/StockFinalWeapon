@@ -108,7 +108,7 @@ class StockViewModel: ObservableObject {
                 }
             }
             
-            let linkCharturl = urlString + "/chart?frm=1mntly&trm=1d&scl=stndrd&styl=lne&evnts=volume&ovrIndctr=sma%2Cmma%2Clma&addIndctr=&compare="
+            let linkCharturl = urlString + "/chart?frm=dly&trm=6m&scl=stndrd&styl=lne&evnts=volume&ovrIndctr=sma%2Cmma%2Clma&addIndctr=&compare="
             // 全て揃ったら構造体を返す
             return MomentumStockInfo(code: code, name: name, price: price, open: openPrice, url: linkCharturl)
             
@@ -153,7 +153,7 @@ struct MomentamRankingScreen: View {
                 } else {
                     
                     ScrollView {
-                        ForEach(viewModel.stocks) {stock in
+                        ForEach(viewModel.stocks) { stock in
                             Link(destination: URL(string: stock.url)!) {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
@@ -164,14 +164,10 @@ struct MomentamRankingScreen: View {
                                             .font(.system(size: 12, design: .monospaced))
                                             .foregroundColor(.secondary)
                                     }
-                                    
                                     Spacer()
-                                    
                                     VStack(alignment: .trailing, spacing: 4) {
                                         Text("\(stock.price)円")
                                             .font(.system(size: 16, weight: .medium))
-                                        
-                                        // 騰落率のバッジ風表示
                                         Text(String(format: "%+.2f%%", stock.changePercentage))
                                             .font(.system(size: 14, weight: .bold, design: .rounded))
                                             .foregroundColor(.white)
@@ -183,11 +179,11 @@ struct MomentamRankingScreen: View {
                                             )
                                     }
                                 }
-                                .padding(.vertical, 4)
+                                .padding()
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(PlainButtonStyle())
                             .openURLInSafariView()
-                            .padding()
                         }
                     }
                 }
@@ -217,3 +213,4 @@ struct MomentamRankingScreen: View {
 #Preview {
     MomentamRankingScreen()
 }
+
