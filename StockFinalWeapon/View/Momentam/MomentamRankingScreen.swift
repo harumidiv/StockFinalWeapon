@@ -17,6 +17,7 @@ struct MomentumStockInfo: Identifiable {
     let name: String
     let price: Int // 現在値
     let open: Int  // 始値
+    let marketCap: String // 時価総額
     let url: String
     
     // 騰落率（％）を計算するプロパティ
@@ -84,33 +85,37 @@ class StockViewModel: ObservableObject {
             guard let html = String(data: data, encoding: .utf8) else { return nil }
             let doc = try SwiftSoup.parse(html)
             
-            // 1. 銘柄名の取得 (タイトル部分などから)
-            // 例: <h1 class="_11S67mE8">キオクシアホールディングス(株)</h1>
+            // 既存の取得処理
             let name = try doc.select("h2.PriceBoard__name__166W").first()?.text() ?? "不明"
-            
-            // 2. 現在値の取得
-            // 例: <span class="_3rXqN9Y8">6,120</span>
             let priceText = try doc.select("span.StyledNumber__value__3rXW").first()?.text() ?? "0"
             let price = parsePrice(priceText)
             
-            // 3. 始値の取得
+            // --- 時価総額と始値の取得 ---
             let dataItems = try doc.select("dl.DataListItem__38iJ")
             var openPrice = 0
+            var marketCap = "---" // 初期値
             
             for item in dataItems {
-                // 2. その中の dt (見出し) に "始値" という文字が含まれているかチェック
                 let term = try item.select("dt.DataListItem__term__30Fb").text()
+                let valueText = try item.select("dd span.DataListItem__value__11kV").text()
+                
                 if term.contains("始値") {
-                    // 3. 含まれていれば、そのペアになっている dd (データ) から数値を取得
-                    let valueText = try item.select("dd span.DataListItem__value__11kV").text()
                     openPrice = parsePrice(valueText)
-                    break // 見つかったらループ終了
+                } else if term.contains("時価総額") {
+                    marketCap = valueText // 例: "1,234,567百万円" や "1兆2,345億円"
                 }
             }
             
-            let linkCharturl = urlString + "/chart?frm=dly&trm=6m&scl=stndrd&styl=lne&evnts=volume&ovrIndctr=sma%2Cmma%2Clma&addIndctr=&compare="
-            // 全て揃ったら構造体を返す
-            return MomentumStockInfo(code: code, name: name, price: price, open: openPrice, url: linkCharturl)
+            let linkCharturl = urlString + "/chart?frm=dly..."
+            
+            return MomentumStockInfo(
+                code: code,
+                name: name,
+                price: price,
+                open: openPrice,
+                marketCap: marketCap, // 取得した値をセット
+                url: linkCharturl
+            )
             
         } catch {
             print("\(code) の詳細取得に失敗: \(error)")
@@ -161,6 +166,9 @@ struct MomentamRankingScreen: View {
                                             .font(.system(size: 16, weight: .bold))
                                             .lineLimit(1)
                                         Text(stock.code)
+                                            .font(.system(size: 12, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                        Text("時価総額: \(stock.marketCap)")
                                             .font(.system(size: 12, design: .monospaced))
                                             .foregroundColor(.secondary)
                                     }
