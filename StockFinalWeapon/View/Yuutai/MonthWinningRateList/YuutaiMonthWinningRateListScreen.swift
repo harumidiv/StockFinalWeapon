@@ -13,6 +13,7 @@ import SwiftData
 enum Sort: String, CaseIterable, Identifiable {
     case winningRate = "勝率順"
     case expectedValue = "期待値順"
+    case trialCount = "試行回数順"
     
     var id: Self { self }
 }
@@ -188,6 +189,8 @@ struct YuutaiMonthWinningRateListScreen: View {
                  return $0.winningRate > $1.winningRate
             case .expectedValue:
                 return $0.expectedValue > $1.expectedValue
+            case .trialCount:
+                return $0.totalCount > $1.totalCount
             }
         }
         stockDisplayWinningRate = value
@@ -202,6 +205,8 @@ struct YuutaiMonthWinningRateListScreen: View {
                 stockDisplayWinningRate.sort { $0.winningRate > $1.winningRate }
             case .expectedValue:
                 stockDisplayWinningRate.sort { $0.expectedValue > $1.expectedValue }
+            case .trialCount:
+                stockDisplayWinningRate.sort { $0.totalCount > $1.totalCount }
             }
         }
     }
