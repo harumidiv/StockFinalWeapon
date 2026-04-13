@@ -271,34 +271,43 @@ private extension YuutaiMonthWinningRateListScreen {
     }
     
     func fetchAllStockInfo(stockInfo: [TanosiiYuutaiInfo], month: YuutaiMonth) async -> [YuutaiSakimawariChartModel] {
-        let value: [FetchStockAllInfoModel] = await withTaskGroup(of: FetchStockAllInfoModel?.self, returning: [FetchStockAllInfoModel].self) { group in
-            let calendar = Calendar.current
-            let year = calendar.component(.year, from: Date()) - 11
-            let start = calendar.date(from: DateComponents(year: year, month: 1, day: 3))!
-            
-            for item in stockInfo {
-                group.addTask {
-                    let result = await YahooYFinanceAPIService().fetchStockChartData(code: item.code, startDate: start, endDate: Date())
-                    switch result {
-                    case .success(let stockChartData):
-                        return FetchStockAllInfoModel(info: item, chartData: stockChartData)
-                    case .failure(_):
-                        return nil
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: Date()) - 11
+        let start = calendar.date(from: DateComponents(year: year, month: 1, day: 3))!
+
+        // 一度に全件並列実行するとメモリ・通信数が爆発するため、20件ずつ処理する
+        let concurrencyLimit = 200
+        var results = [FetchStockAllInfoModel]()
+
+        for chunkStart in stride(from: 0, to: stockInfo.count, by: concurrencyLimit) {
+            let chunk = Array(stockInfo[chunkStart..<min(chunkStart + concurrencyLimit, stockInfo.count)])
+
+            let chunkResults = await withTaskGroup(of: FetchStockAllInfoModel?.self, returning: [FetchStockAllInfoModel].self) { group in
+                for item in chunk {
+                    group.addTask {
+                        let result = await YahooYFinanceAPIService().fetchStockChartData(code: item.code, startDate: start, endDate: Date())
+                        switch result {
+                        case .success(let stockChartData):
+                            return FetchStockAllInfoModel(info: item, chartData: stockChartData)
+                        case .failure(_):
+                            return nil
+                        }
                     }
                 }
-            }
-            
-            var results = [FetchStockAllInfoModel]()
-            for await maybeInfo in group {
-                if let info = maybeInfo {
-                    results.append(info)
+
+                var batch = [FetchStockAllInfoModel]()
+                for await maybeInfo in group {
+                    if let info = maybeInfo {
+                        batch.append(info)
+                    }
                 }
+                return batch
             }
-            
-            return results
+
+            results.append(contentsOf: chunkResults)
         }
-        
-        return value.compactMap{ YuutaiSakimawariChartModel(month: month, yuutaiInfo: $0.info, stockChartData: $0.chartData) }
+
+        return results.compactMap { YuutaiSakimawariChartModel(month: month, yuutaiInfo: $0.info, stockChartData: $0.chartData) }
     }
     
     /// 勝率を計算
