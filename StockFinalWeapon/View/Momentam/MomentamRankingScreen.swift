@@ -25,6 +25,12 @@ struct MomentumStockInfo: Identifiable {
         guard open > 0 else { return 0.0 }
         return (Double(price - open) / Double(open)) * 100
     }
+
+    // 時価総額が1兆円未満かどうか（百万円単位の数字文字列から判定）
+    var isUnderOneTrillion: Bool {
+        let digits = marketCap.replacingOccurrences(of: ",", with: "").filter { $0.isNumber }
+        return (Int64(digits) ?? 0) < 1_000_000
+    }
 }
 
 class StockViewModel: ObservableObject {
@@ -170,7 +176,7 @@ struct MomentamRankingScreen: View {
                                             .foregroundColor(.secondary)
                                         Text("時価総額: \(stock.marketCap)")
                                             .font(.system(size: 12, design: .monospaced))
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(stock.isUnderOneTrillion ? .orange : .secondary)
                                     }
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 4) {
