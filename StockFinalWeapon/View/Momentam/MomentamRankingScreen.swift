@@ -126,18 +126,19 @@ class StockViewModel: ObservableObject {
             let doc = try SwiftSoup.parse(html)
             
             // 既存の取得処理
-            let name = try doc.select("h2.PriceBoard__name__166W").first()?.text() ?? "不明"
-            let priceText = try doc.select("span.StyledNumber__value__3rXW").first()?.text() ?? "0"
+            // Yahoo FinanceのCSSクラス名は末尾にビルドハッシュが付くため、安定部分のみで部分一致させる
+            let name = try doc.select("h2[class*=BasePriceBoard__name_]").first()?.text() ?? "不明"
+            let priceText = try doc.select("span[class*=StyledNumber__value]").first()?.text() ?? "0"
             let price = parsePrice(priceText)
-            
+
             // --- 時価総額と始値の取得 ---
-            let dataItems = try doc.select("dl.DataListItem__38iJ")
+            let dataItems = try doc.select("dl[class*=_DataListItem_]")
             var openPrice = 0
             var marketCap = "---" // 初期値
-            
+
             for item in dataItems {
-                let term = try item.select("dt.DataListItem__term__30Fb").text()
-                let valueText = try item.select("dd span.DataListItem__value__11kV").text()
+                let term = try item.select("dt[class*=DataListItem__term]").text()
+                let valueText = try item.select("dd span[class*=DataListItem__value]").text()
                 
                 if term.contains("始値") {
                     openPrice = parsePrice(valueText)
