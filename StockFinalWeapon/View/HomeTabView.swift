@@ -8,12 +8,12 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
+    case momentam
+    case sndkDiff
     case yuutaiSakimawari
     case trailing
     case ipo
     case jQuants
-    case momentam
-    case sndkDiff
     case mypage
 
     var id: Self { self }
@@ -44,7 +44,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 }
 
 struct HomeTabView: View {
-    @State private var selectedTab: AppTab = .yuutaiSakimawari
+    @State private var selectedTab: AppTab = .momentam
     
     var body: some View {
         TabView(selection: $selectedTab) {
