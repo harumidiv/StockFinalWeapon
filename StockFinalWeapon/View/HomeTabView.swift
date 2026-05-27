@@ -13,10 +13,11 @@ enum AppTab: String, CaseIterable, Identifiable {
     case ipo
     case jQuants
     case momentam
+    case sndkDiff
     case mypage
-    
+
     var id: Self { self }
-    
+
     var title: String {
         switch self {
         case .yuutaiSakimawari: return "優待"
@@ -24,10 +25,11 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .ipo: return "IPO"
         case .jQuants: return "JQuants"
         case .momentam: return "モメンタム"
+        case .sndkDiff: return "SNDK差分"
         case .mypage: return "マイページ"
         }
     }
-    
+
     var icon: String {
         switch self {
         case .yuutaiSakimawari: return "gift.fill"
@@ -35,6 +37,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .ipo: return "sparkles"
         case .jQuants: return "chart.bar.fill"
         case .momentam: return "bolt.fill"
+        case .sndkDiff: return "arrow.left.arrow.right"
         case .mypage: return "person.fill"
         }
     }
@@ -78,6 +81,12 @@ struct HomeTabView: View {
                             Label(AppTab.momentam.title, systemImage: AppTab.momentam.icon)
                         }
                         .tag(AppTab.momentam)
+                case .sndkDiff:
+                    SNDKDiffScreen()
+                        .tabItem {
+                            Label(AppTab.sndkDiff.title, systemImage: AppTab.sndkDiff.icon)
+                        }
+                        .tag(AppTab.sndkDiff)
                 case .mypage:
                     MypageScreen()
                         .tabItem {
