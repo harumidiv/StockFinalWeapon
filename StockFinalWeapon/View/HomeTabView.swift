@@ -10,6 +10,7 @@ import SwiftUI
 enum AppTab: String, CaseIterable, Identifiable {
     case momentam
     case sndkDiff
+    case winRate
     case yuutaiSakimawari
     case trailing
     case ipo
@@ -26,6 +27,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .jQuants: return "JQuants"
         case .momentam: return "モメンタム"
         case .sndkDiff: return "SNDK差分"
+        case .winRate: return "勝率"
         case .mypage: return "マイページ"
         }
     }
@@ -38,6 +40,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .jQuants: return "chart.bar.fill"
         case .momentam: return "bolt.fill"
         case .sndkDiff: return "arrow.left.arrow.right"
+        case .winRate: return "percent"
         case .mypage: return "person.fill"
         }
     }
@@ -87,6 +90,12 @@ struct HomeTabView: View {
                             Label(AppTab.sndkDiff.title, systemImage: AppTab.sndkDiff.icon)
                         }
                         .tag(AppTab.sndkDiff)
+                case .winRate:
+                    OvernightWinRateScreen()
+                        .tabItem {
+                            Label(AppTab.winRate.title, systemImage: AppTab.winRate.icon)
+                        }
+                        .tag(AppTab.winRate)
                 case .mypage:
                     MypageScreen()
                         .tabItem {
