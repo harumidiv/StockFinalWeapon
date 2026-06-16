@@ -28,6 +28,18 @@ class SNDKDiffViewModel: ObservableObject {
         return sndkJPY / k.sharesOutstanding
     }
 
+    // キオクシアがSNDK時価総額の +10% になった場合の株価
+    var kioxiaTargetPricePlus10: Double? {
+        guard let p = kioxiaTargetPrice else { return nil }
+        return p * 1.1
+    }
+
+    // キオクシアがSNDK時価総額の −10% になった場合の株価
+    var kioxiaTargetPriceMinus10: Double? {
+        guard let p = kioxiaTargetPrice else { return nil }
+        return p * 0.9
+    }
+
     func fetchAll() async {
         DispatchQueue.main.async {
             self.isLoading = true
@@ -112,43 +124,65 @@ struct SNDKDiffScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    if viewModel.isLoading {
-                        ProgressView("取得中...")
-                            .padding(.top, 80)
-                    } else {
-                        // USD/JPY
-                        if let rate = viewModel.usdJpy {
-                            InfoCard(title: "USD/JPY", value: String(format: "%.2f 円", rate))
-                        }
+                    // USD/JPY
+                    if let rate = viewModel.usdJpy {
+                        InfoCard(title: "USD/JPY", value: String(format: "%.2f 円", rate))
+                    }
 
-                        // SNDK
-                        SectionHeader(title: "SNDK（サンディスク）")
-                        if let cap = viewModel.sndkMarketCapJPY {
-                            InfoCard(title: "時価総額", value: formatJPY(cap))
-                        }
+                    // SNDK
+                    SectionHeader(title: "SNDK（サンディスク）")
+                    if let cap = viewModel.sndkMarketCapJPY {
+                        InfoCard(title: "時価総額", value: formatJPY(cap))
+                    }
 
-                        // キオクシア
-                        SectionHeader(title: "キオクシア（285A）")
-                        if let k = viewModel.kioxia {
-                            InfoCard(title: "現在株価", value: formatYen(k.currentPrice))
-                            InfoCard(title: "時価総額", value: formatJPY(k.marketCapJPY))
-                        }
+                    // キオクシア
+                    SectionHeader(title: "キオクシア（285A）")
+                    if let k = viewModel.kioxia {
+                        InfoCard(title: "現在株価", value: formatYen(k.currentPrice))
+                        InfoCard(title: "時価総額", value: formatJPY(k.marketCapJPY))
+                    }
 
-                        // 目標株価
-                        if let target = viewModel.kioxiaTargetPrice {
-                            SectionHeader(title: "試算")
-                            TargetPriceCard(
+                    // 目標株価
+                    if let target = viewModel.kioxiaTargetPrice {
+                        SectionHeader(title: "試算")
+                        TargetPriceCard(
+                            caption: "キオクシアがSNDKと同じ時価総額になった場合",
+                            currentPrice: viewModel.kioxia?.currentPrice,
+                            targetPrice: target,
+                            accent: .yellow
+                        )
+                        if let plus10 = viewModel.kioxiaTargetPricePlus10 {
+                            CompactTargetPriceCard(
+                                caption: "SNDK時価総額 +10%",
                                 currentPrice: viewModel.kioxia?.currentPrice,
-                                targetPrice: target
+                                targetPrice: plus10,
+                                accent: .red
                             )
                         }
-
-                        if let error = viewModel.errorMessage {
-                            Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
+                        if let minus10 = viewModel.kioxiaTargetPriceMinus10 {
+                            CompactTargetPriceCard(
+                                caption: "SNDK時価総額 −10%",
+                                currentPrice: viewModel.kioxia?.currentPrice,
+                                targetPrice: minus10,
+                                accent: .blue
+                            )
                         }
+                    }
+
+                    if let error = viewModel.errorMessage {
+                        Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
                     }
                 }
                 .padding(.vertical)
+                .frame(maxWidth: .infinity)
+            }
+            // ローディングは中身を入れ替えず上に重ねる（大きいタイトルの高さ計算が崩れないように）
+            .overlay {
+                if viewModel.isLoading {
+                    ProgressView("取得中...")
+                        .padding(20)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
             }
             .navigationTitle("SNDK差分")
             .toolbar {
@@ -215,8 +249,10 @@ private struct InfoCard: View {
 }
 
 private struct TargetPriceCard: View {
+    let caption: String
     let currentPrice: Double?
     let targetPrice: Double
+    var accent: Color = .accentColor
 
     private var upside: Double? {
         guard let cur = currentPrice, cur > 0 else { return nil }
@@ -225,7 +261,7 @@ private struct TargetPriceCard: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Text("キオクシアがSNDKと同じ時価総額になった場合")
+            Text(caption)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -242,9 +278,56 @@ private struct TargetPriceCard: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.accentColor.opacity(0.15))
+                .fill(accent.opacity(0.15))
         )
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor.opacity(0.4), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(accent.opacity(0.4), lineWidth: 1))
+        .padding(.horizontal)
+    }
+
+    private var formattedTarget: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return (formatter.string(from: NSNumber(value: targetPrice)) ?? "") + "円"
+    }
+}
+
+/// 補助的な目標株価カード（コンパクト表示）
+private struct CompactTargetPriceCard: View {
+    let caption: String
+    let currentPrice: Double?
+    let targetPrice: Double
+    var accent: Color = .accentColor
+
+    private var upside: Double? {
+        guard let cur = currentPrice, cur > 0 else { return nil }
+        return (targetPrice - cur) / cur * 100
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(caption)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(formattedTarget)
+                .font(.headline)
+                .foregroundColor(.primary)
+            if let up = upside {
+                Text(String(format: "%+.1f%%", up))
+                    .font(.caption.bold())
+                    .foregroundColor(up >= 0 ? .red : .blue)
+                    .frame(width: 60, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(accent.opacity(0.12))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.35), lineWidth: 1))
         .padding(.horizontal)
     }
 
