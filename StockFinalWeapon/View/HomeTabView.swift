@@ -8,8 +8,8 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case momentam
     case sndkDiff
+    case momentam
     case winRate
     case yuutaiSakimawari
     case trailing
@@ -47,7 +47,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 }
 
 struct HomeTabView: View {
-    @State private var selectedTab: AppTab = .momentam
+    @State private var selectedTab: AppTab = .sndkDiff
     
     var body: some View {
         TabView(selection: $selectedTab) {
