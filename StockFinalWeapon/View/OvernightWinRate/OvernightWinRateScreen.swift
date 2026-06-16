@@ -15,7 +15,7 @@ enum WinRatePeriod: String, CaseIterable, Identifiable {
     case threeMonths = "3ヶ月"
     case sixMonths = "6ヶ月"
     case oneYear = "1年"
-    case threeYears = "3年"
+    case allPeriod = "全期間"
 
     var id: Self { self }
 
@@ -26,7 +26,7 @@ enum WinRatePeriod: String, CaseIterable, Identifiable {
         case .threeMonths: return 93
         case .sixMonths: return 186
         case .oneYear: return 366
-        case .threeYears: return 1096
+        case .allPeriod: return 36500 // 取得できる限り遡る（約100年）
         }
     }
 }
