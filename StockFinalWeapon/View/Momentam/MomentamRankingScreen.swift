@@ -20,7 +20,8 @@ struct MomentumStockInfo: Identifiable {
     let open: Int  // 始値
     let marketCap: String // 時価総額
     let url: String
-    
+    let isUwabanareNarabiAka: Bool // 日足が「上放れ並び赤」かどうか
+
     // 騰落率（％）を計算するプロパティ
     var changePercentage: Double {
         guard open > 0 else { return 0.0 }
@@ -148,7 +149,10 @@ class StockViewModel: ObservableObject {
             }
             
             let linkCharturl = urlString + "/chart?frm=dly..."
-            
+
+            // 日足を取得して「上放れ並び赤」かどうかを判定
+            let isUwabanare = await detectUwabanareNarabiAka(code: code)
+
             return MomentumStockInfo(
                 rank: rank,
                 code: code,
@@ -156,7 +160,8 @@ class StockViewModel: ObservableObject {
                 price: price,
                 open: openPrice,
                 marketCap: marketCap,
-                url: linkCharturl
+                url: linkCharturl,
+                isUwabanareNarabiAka: isUwabanare
             )
             
         } catch {
@@ -165,6 +170,60 @@ class StockViewModel: ObservableObject {
         }
     }
     
+    /// 日足チャートを取得し「上放れ並び赤」パターンかどうかを判定する
+    private func detectUwabanareNarabiAka(code: String) async -> Bool {
+        let end = Date()
+        // 直近3営業日ぶんを確実に取得するため、休日を考慮して20日前から取得
+        guard let start = Calendar.current.date(byAdding: .day, value: -20, to: end) else { return false }
+
+        let result = await YahooYFinanceAPIService().fetchStockChartData(code: code, startDate: start, endDate: end)
+        switch result {
+        case .success(let candles):
+            return isUwabanareNarabiAka(candles: candles)
+        case .failure:
+            return false
+        }
+    }
+
+    /// 「上放れ並び赤」判定（標準）
+    /// 直近3本の日足 [A, B, C] について、
+    /// - A→B で窓を空けて上放れ（Bの安値 > Aの高値）
+    /// - B・Cがともに陽線（赤）
+    /// - Cの始値がBの始値の±2%以内（並び）
+    /// - B・Cの実体の長さが概ね同程度（小さい方/大きい方 >= 0.5）
+    private func isUwabanareNarabiAka(candles: [MyStockChartData]) -> Bool {
+        // 有効なOHLCのみを日付昇順に並べる
+        let bars = candles
+            .compactMap { c -> (date: Date, open: Float, high: Float, low: Float, close: Float)? in
+                guard let d = c.date, let o = c.open, let h = c.high, let l = c.low, let cl = c.close else { return nil }
+                return (d, o, h, l, cl)
+            }
+            .sorted { $0.date < $1.date }
+
+        guard bars.count >= 3 else { return false }
+        let a = bars[bars.count - 3]
+        let b = bars[bars.count - 2]
+        let c = bars[bars.count - 1]
+
+        // 上放れ（窓空け上昇）
+        guard b.low > a.high else { return false }
+
+        // B・Cともに陽線
+        guard b.close > b.open, c.close > c.open else { return false }
+
+        // 並び：始値がほぼ同じ（±2%以内）
+        guard b.open > 0 else { return false }
+        guard abs(c.open - b.open) / b.open <= 0.02 else { return false }
+
+        // 実体の長さが概ね同程度
+        let bodyB = b.close - b.open
+        let bodyC = c.close - c.open
+        let larger = max(bodyB, bodyC)
+        guard larger > 0, min(bodyB, bodyC) / larger >= 0.5 else { return false }
+
+        return true
+    }
+
     private func fetchOpenPrice(code: String) async -> Int? {
         let url = URL(string: "https://finance.yahoo.co.jp/quote/\(code).T")!
         do {
@@ -217,6 +276,20 @@ struct MomentamRankingScreen: View {
                                         Text("時価総額: \(stock.marketCap)")
                                             .font(.system(size: 12, design: .monospaced))
                                             .foregroundColor(stock.isUnderOneTrillion ? .orange : .secondary)
+                                        if stock.isUwabanareNarabiAka {
+                                            HStack(spacing: 3) {
+                                                Image(systemName: "flame.fill")
+                                                Text("上放れ並び赤")
+                                            }
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 4)
+                                                    .fill(Color.red)
+                                            )
+                                        }
                                     }
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 4) {
