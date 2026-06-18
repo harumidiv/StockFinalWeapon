@@ -328,8 +328,9 @@ struct MomentamRankingScreen: View {
                 }
             }
         }
-        // 画面が表示された時に自動で読み込みを開始
+        // 初回のみ自動で読み込み。すでにデータがある（キャッシュ済み）場合は再読み込みしない
         .onAppear {
+            guard viewModel.stocks.isEmpty, !viewModel.isLoading else { return }
             Task {
                 await viewModel.fetchData()
             }
