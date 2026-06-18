@@ -41,8 +41,67 @@ struct OvernightWinRateResult {
     let winRate: Double          // 勝率（％）
     let averageReturn: Double    // 1トレードあたり平均損益率（％）
     let cumulativeReturn: Double // 期間中ずっと繰り返した場合の累積リターン（％）
+    let buyAndHoldReturn: Double // 期間中ずっと保有した場合の上昇率（％）
     let startDate: Date?
     let endDate: Date?
+}
+
+extension OvernightWinRateResult {
+    /// 取得したローソク足から「終値で買い、翌日始値で売る」戦略の集計結果を作る。
+    /// 有効データが2本未満の場合は nil を返す。
+    static func make(code: String, candles: [MyStockChartData]) -> OvernightWinRateResult? {
+        // 有効な始値・終値のみを日付昇順に整理
+        let bars = candles
+            .compactMap { c -> (date: Date, open: Float, close: Float)? in
+                guard let d = c.date, let o = c.open, let cl = c.close, o > 0, cl > 0 else { return nil }
+                return (d, o, cl)
+            }
+            .sorted { $0.date < $1.date }
+
+        guard bars.count >= 2 else { return nil }
+
+        var wins = 0, losses = 0, draws = 0
+        var returnSum = 0.0
+        var cumulative = 1.0
+
+        // 当日終値で買い、翌日始値で売る
+        for i in 0..<(bars.count - 1) {
+            let buy = bars[i].close
+            let sell = bars[i + 1].open
+            let ret = Double(sell - buy) / Double(buy)
+            returnSum += ret
+            cumulative *= (1 + ret)
+
+            if sell > buy {
+                wins += 1
+            } else if sell < buy {
+                losses += 1
+            } else {
+                draws += 1
+            }
+        }
+
+        let total = bars.count - 1
+
+        // 期間中ずっと保有した場合の上昇率（最初の終値で買い、最後の終値で売る）
+        let firstClose = bars.first!.close
+        let lastClose = bars.last!.close
+        let buyAndHoldReturn = Double(lastClose - firstClose) / Double(firstClose) * 100
+
+        return OvernightWinRateResult(
+            code: code,
+            totalTrades: total,
+            wins: wins,
+            losses: losses,
+            draws: draws,
+            winRate: Double(wins) / Double(total) * 100,
+            averageReturn: returnSum / Double(total) * 100,
+            cumulativeReturn: (cumulative - 1) * 100,
+            buyAndHoldReturn: buyAndHoldReturn,
+            startDate: bars.first?.date,
+            endDate: bars.last?.date
+        )
+    }
 }
 
 @MainActor
@@ -51,72 +110,38 @@ final class OvernightWinRateViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
+    /// 今日から period.days 分遡って集計する
     func calculate(code: String, period: WinRatePeriod) async {
+        let end = Date()
+        guard let start = Calendar.current.date(byAdding: .day, value: -period.days, to: end) else { return }
+        await calculate(code: code, start: start, end: end)
+    }
+
+    /// 開始日〜終了日を明示的に指定して集計する
+    func calculate(code: String, start: Date, end: Date) async {
         let trimmed = code.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
+
+        guard start < end else {
+            errorMessage = "開始日は終了日より前の日付を指定してください。"
+            result = nil
+            return
+        }
 
         isLoading = true
         errorMessage = nil
         result = nil
 
-        let end = Date()
-        guard let start = Calendar.current.date(byAdding: .day, value: -period.days, to: end) else {
-            isLoading = false
-            return
-        }
-
         let apiResult = await YahooYFinanceAPIService().fetchStockChartData(code: trimmed, startDate: start, endDate: end)
 
         switch apiResult {
         case .success(let candles):
-            // 有効な始値・終値のみを日付昇順に整理
-            let bars = candles
-                .compactMap { c -> (date: Date, open: Float, close: Float)? in
-                    guard let d = c.date, let o = c.open, let cl = c.close, o > 0, cl > 0 else { return nil }
-                    return (d, o, cl)
-                }
-                .sorted { $0.date < $1.date }
-
-            guard bars.count >= 2 else {
+            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles) else {
                 errorMessage = "データが不足しています。銘柄コードと期間をご確認ください。"
                 isLoading = false
                 return
             }
-
-            var wins = 0, losses = 0, draws = 0
-            var returnSum = 0.0
-            var cumulative = 1.0
-
-            // 当日終値で買い、翌日始値で売る
-            for i in 0..<(bars.count - 1) {
-                let buy = bars[i].close
-                let sell = bars[i + 1].open
-                let ret = Double(sell - buy) / Double(buy)
-                returnSum += ret
-                cumulative *= (1 + ret)
-
-                if sell > buy {
-                    wins += 1
-                } else if sell < buy {
-                    losses += 1
-                } else {
-                    draws += 1
-                }
-            }
-
-            let total = bars.count - 1
-            result = OvernightWinRateResult(
-                code: trimmed,
-                totalTrades: total,
-                wins: wins,
-                losses: losses,
-                draws: draws,
-                winRate: Double(wins) / Double(total) * 100,
-                averageReturn: returnSum / Double(total) * 100,
-                cumulativeReturn: (cumulative - 1) * 100,
-                startDate: bars.first?.date,
-                endDate: bars.last?.date
-            )
+            result = made
 
         case .failure(let error):
             errorMessage = "取得に失敗しました: \(error.localizedDescription)"
@@ -126,11 +151,49 @@ final class OvernightWinRateViewModel: ObservableObject {
     }
 }
 
+/// 期間の指定方法
+enum WinRateRangeMode: String, CaseIterable, Identifiable {
+    case preset = "期間プリセット"
+    case custom = "日付指定"
+    var id: Self { self }
+}
+
 struct OvernightWinRateScreen: View {
     @StateObject private var viewModel = OvernightWinRateViewModel()
     @State private var code: String = ""
     @State private var period: WinRatePeriod = .oneYear
+    @State private var rangeMode: WinRateRangeMode = .preset
+    @State private var startDate: Date = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+    @State private var endDate: Date = Date()
     @FocusState private var isFocused: Bool
+
+    /// 現在のモードに応じて計算を実行
+    private func runCalculation() async {
+        switch rangeMode {
+        case .preset:
+            await viewModel.calculate(code: code, period: period)
+        case .custom:
+            await viewModel.calculate(code: code, start: startDate, end: endDate)
+        }
+    }
+
+    /// すでに結果（またはエラー）が表示されている場合のみ再計算する
+    private func recalculateIfNeeded() {
+        guard viewModel.result != nil || viewModel.errorMessage != nil else { return }
+        Task { await runCalculation() }
+    }
+
+    /// 現在のモードに応じた集計期間（開始日・終了日）。ランキング一覧へ引き継ぐ。
+    private var resolvedRange: (start: Date, end: Date) {
+        switch rangeMode {
+        case .preset:
+            let end = Date()
+            let start = Calendar.current.date(byAdding: .day, value: -period.days, to: end) ?? end
+            return (start, end)
+        case .custom:
+            return (startDate, endDate)
+        }
+    }
 
     var body: some View {
         NavigationView {
@@ -147,17 +210,33 @@ struct OvernightWinRateScreen: View {
                             .keyboardType(.numbersAndPunctuation)
                             .textFieldStyle(.roundedBorder)
 
-                        Picker("期間", selection: $period) {
-                            ForEach(WinRatePeriod.allCases) { p in
-                                Text(p.rawValue).tag(p)
+                        Picker("指定方法", selection: $rangeMode) {
+                            ForEach(WinRateRangeMode.allCases) { m in
+                                Text(m.rawValue).tag(m)
                             }
                         }
                         .pickerStyle(.segmented)
 
+                        switch rangeMode {
+                        case .preset:
+                            Picker("期間", selection: $period) {
+                                ForEach(WinRatePeriod.allCases) { p in
+                                    Text(p.rawValue).tag(p)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        case .custom:
+                            VStack(alignment: .leading, spacing: 8) {
+                                DatePicker("開始日", selection: $startDate, in: ...endDate, displayedComponents: .date)
+                                DatePicker("終了日", selection: $endDate, in: startDate..., displayedComponents: .date)
+                            }
+                            .font(.system(size: 14))
+                        }
+
                         Button(action: {
                             Task {
                                 isFocused = false
-                                await viewModel.calculate(code: code, period: period)
+                                await runCalculation()
                             }
                         }) {
                             Label("勝率を計算", systemImage: "chart.line.uptrend.xyaxis")
@@ -180,7 +259,7 @@ struct OvernightWinRateScreen: View {
                             .font(.system(size: 14))
                             .foregroundColor(.red)
                     } else if let result = viewModel.result {
-                        resultCard(result)
+                        OvernightWinRateResultCard(result: result)
                     }
 
                     Spacer()
@@ -188,23 +267,37 @@ struct OvernightWinRateScreen: View {
                 .padding()
             }
             .navigationTitle("引in→寄out 勝率")
-            // 期間を変えたら、すでに結果がある場合は再計算
-            .onChange(of: period) { _, _ in
-                guard viewModel.result != nil || viewModel.errorMessage != nil else { return }
-                Task { await viewModel.calculate(code: code, period: period) }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink {
+                        let range = resolvedRange
+                        OvernightWinRateRankingScreen(start: range.start, end: range.end)
+                    } label: {
+                        Image(systemName: "list.number")
+                    }
+                }
             }
+            // 期間・指定方法・日付を変えたら、すでに結果がある場合は再計算
+            .onChange(of: period) { _, _ in recalculateIfNeeded() }
+            .onChange(of: rangeMode) { _, _ in recalculateIfNeeded() }
+            .onChange(of: startDate) { _, _ in recalculateIfNeeded() }
+            .onChange(of: endDate) { _, _ in recalculateIfNeeded() }
         }
     }
+}
 
-    @ViewBuilder
-    private func resultCard(_ result: OvernightWinRateResult) -> some View {
+/// 集計結果カード（入力画面・ランキング詳細画面で共用）
+struct OvernightWinRateResultCard: View {
+    let result: OvernightWinRateResult
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("\(result.code)")
                     .font(.system(size: 18, weight: .bold, design: .monospaced))
                 Spacer()
                 if let s = result.startDate, let e = result.endDate {
-                    Text("\(dateText(s)) 〜 \(dateText(e))")
+                    Text("\(Self.dateText(s)) 〜 \(Self.dateText(e))")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
@@ -235,6 +328,11 @@ struct OvernightWinRateScreen: View {
                 value: String(format: "%+.2f%%", result.cumulativeReturn),
                 color: result.cumulativeReturn >= 0 ? .red : .blue
             )
+            statRow(
+                label: "ずっと保有した場合の上昇率",
+                value: String(format: "%+.2f%%", result.buyAndHoldReturn),
+                color: result.buyAndHoldReturn >= 0 ? .red : .blue
+            )
         }
         .padding()
         .background(
@@ -256,7 +354,7 @@ struct OvernightWinRateScreen: View {
         }
     }
 
-    private func dateText(_ date: Date) -> String {
+    static func dateText(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy/MM/dd"
         return f.string(from: date)
