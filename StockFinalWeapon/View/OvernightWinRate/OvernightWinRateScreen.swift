@@ -564,9 +564,14 @@ struct OvernightWinRateResultCard: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
+            Label("★ = オーバーナイトがずっと保有を上回った年", systemImage: "star.fill")
+                .labelStyle(.titleOnly)
+                .font(.system(size: 11))
+                .foregroundColor(.orange)
+
             // ヘッダー
             HStack {
-                Text("年").frame(width: 52, alignment: .leading)
+                Text("年").frame(width: 64, alignment: .leading)
                 Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
                 Text("オーバーナイト").frame(maxWidth: .infinity, alignment: .trailing)
                 Text("ずっと保有").frame(maxWidth: .infinity, alignment: .trailing)
@@ -575,14 +580,22 @@ struct OvernightWinRateResultCard: View {
             .foregroundColor(.secondary)
 
             ForEach(result.yearlyPerformance) { y in
+                let overnightWins = y.overnightProfit > y.buyAndHoldProfit
                 HStack {
-                    Text(verbatim: "\(y.year)")
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        .frame(width: 52, alignment: .leading)
+                    HStack(spacing: 3) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(.orange)
+                            .opacity(overnightWins ? 1 : 0)
+                        Text(verbatim: "\(y.year)")
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    }
+                    .frame(width: 64, alignment: .leading)
                     Text(y.trades > 0 ? String(format: "%.0f%%", y.winRate) : "—")
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .foregroundColor(.secondary)
                     Text(Self.signedYenText(y.overnightProfit))
+                        .fontWeight(overnightWins ? .bold : .regular)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .foregroundColor(y.overnightProfit >= 0 ? .red : .blue)
                     Text(Self.signedYenText(y.buyAndHoldProfit))
@@ -590,6 +603,12 @@ struct OvernightWinRateResultCard: View {
                         .foregroundColor(y.buyAndHoldProfit >= 0 ? .red : .blue)
                 }
                 .font(.system(size: 13, design: .monospaced))
+                .padding(.vertical, 3)
+                .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(overnightWins ? Color.orange.opacity(0.12) : Color.clear)
+                )
             }
         }
     }
