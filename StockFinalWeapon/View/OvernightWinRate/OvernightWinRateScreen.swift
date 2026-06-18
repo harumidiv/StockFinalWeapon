@@ -32,12 +32,13 @@ enum WinRatePeriod: String, CaseIterable, Identifiable {
     }
 }
 
-/// 資産推移チャートの1点（初期投資額をそろえて2戦略を比較する）
+/// 資産推移チャートの1点（初期投資額をそろえて各戦略を比較する）
 struct OvernightEquityPoint: Identifiable {
     var id: Date { date }
     let date: Date
-    let overnight: Double  // オーバーナイト戦略（引け買い→翌寄り売りを毎日繰り返した）評価額（円）
-    let buyAndHold: Double // 100株をずっと保有した場合の評価額（円）
+    let overnight: Double    // オーバーナイト戦略（引け買い→翌寄り売りを毎日繰り返した）評価額・コスト前（円）
+    let overnightNet: Double // 上記から 税(20.315%)・信用金利(年2.8%) を控除した実質手取り（円）
+    let buyAndHold: Double   // 100株をずっと保有した場合の評価額（円）
 }
 
 /// 集計結果
@@ -72,17 +73,24 @@ extension OvernightWinRateResult {
 
         var wins = 0, losses = 0, draws = 0
         var returnSum = 0.0
-        var cumulative = 1.0
 
         // 初期投資額をそろえる（最初の終値で 100株 買った金額）
         let shares = 100.0
         let firstClose = bars.first!.close
         let initialCapital = Double(firstClose) * shares
-        var overnightEquity = initialCapital
 
-        // 1点目（取引前。両戦略とも初期投資額からスタート）
+        // コスト設定
+        let taxRate = 0.20315          // 譲渡益課税 20.315%
+        let annualInterestRate = 0.028 // 信用金利 年2.8%
+        let calendar = Calendar.current
+
+        // 単利：毎回 100株 固定で売買し、損益はキャッシュとして積み上げる（再投資しない）
+        var overnightEquity = initialCapital  // コスト前
+        var cumulativeInterest = 0.0          // 累積の信用金利
+
+        // 1点目（取引前。全戦略とも初期投資額からスタート）
         var equityCurve: [OvernightEquityPoint] = [
-            OvernightEquityPoint(date: bars[0].date, overnight: initialCapital, buyAndHold: initialCapital)
+            OvernightEquityPoint(date: bars[0].date, overnight: initialCapital, overnightNet: initialCapital, buyAndHold: initialCapital)
         ]
 
         // 当日終値で買い、翌日始値で売る
@@ -91,7 +99,6 @@ extension OvernightWinRateResult {
             let sell = bars[i + 1].open
             let ret = Double(sell - buy) / Double(buy)
             returnSum += ret
-            cumulative *= (1 + ret)
 
             if sell > buy {
                 wins += 1
@@ -101,11 +108,22 @@ extension OvernightWinRateResult {
                 draws += 1
             }
 
-            // 翌日（取引完了時点）の評価額を記録
-            overnightEquity *= (1 + ret)
+            // 信用金利: 建玉（買い金額 = 100株ぶん）に対し、持ち越した日数ぶん課金
+            let notional = Double(buy) * shares
+            let daysHeld = max(1, calendar.dateComponents([.day], from: bars[i].date, to: bars[i + 1].date).day ?? 1)
+            cumulativeInterest += notional * annualInterestRate * Double(daysHeld) / 365.0
+
+            // 100株固定の損益をキャッシュに加算（単利）
+            overnightEquity += Double(sell - buy) * shares
+
+            // 税・金利控除後（実質手取り）。金利を引いた後、含み益にのみ課税し、損失は満額負担
+            let afterInterest = overnightEquity - cumulativeInterest
+            let netProfit = afterInterest - initialCapital
+            let overnightNet = netProfit > 0 ? initialCapital + netProfit * (1 - taxRate) : afterInterest
+
             let buyAndHoldEquity = Double(bars[i + 1].close) * shares
             equityCurve.append(
-                OvernightEquityPoint(date: bars[i + 1].date, overnight: overnightEquity, buyAndHold: buyAndHoldEquity)
+                OvernightEquityPoint(date: bars[i + 1].date, overnight: overnightEquity, overnightNet: overnightNet, buyAndHold: buyAndHoldEquity)
             )
         }
 
@@ -123,7 +141,7 @@ extension OvernightWinRateResult {
             draws: draws,
             winRate: Double(wins) / Double(total) * 100,
             averageReturn: returnSum / Double(total) * 100,
-            cumulativeReturn: (cumulative - 1) * 100,
+            cumulativeReturn: (overnightEquity - initialCapital) / initialCapital * 100,
             buyAndHoldReturn: buyAndHoldReturn,
             equityCurve: equityCurve,
             startDate: bars.first?.date,
@@ -341,7 +359,7 @@ struct OvernightWinRateResultCard: View {
                 color: result.averageReturn >= 0 ? .red : .blue
             )
             statRow(
-                label: "累積リターン（複利）",
+                label: "累積リターン（単利・100株固定）",
                 value: String(format: "%+.2f%%", result.cumulativeReturn),
                 color: result.cumulativeReturn >= 0 ? .red : .blue
             )
@@ -363,10 +381,11 @@ struct OvernightWinRateResultCard: View {
         )
     }
 
-    private static let overnightLabel = "オーバーナイト戦略（複利）"
+    private static let overnightLabel = "オーバーナイト戦略（単利・コスト前）"
+    private static let overnightNetLabel = "税・金利控除後（手取り）"
     private static let buyAndHoldLabel = "100株ずっと保有"
 
-    /// 初期投資額をそろえた2戦略の資産推移チャート
+    /// 初期投資額をそろえた各戦略の資産推移チャート
     @ViewBuilder
     private var equityChart: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -383,12 +402,19 @@ struct OvernightWinRateResultCard: View {
 
                 LineMark(
                     x: .value("日付", point.date),
+                    y: .value("評価額", point.overnightNet)
+                )
+                .foregroundStyle(by: .value("系列", Self.overnightNetLabel))
+
+                LineMark(
+                    x: .value("日付", point.date),
                     y: .value("評価額", point.buyAndHold)
                 )
                 .foregroundStyle(by: .value("系列", Self.buyAndHoldLabel))
             }
             .chartForegroundStyleScale([
                 Self.overnightLabel: Color.orange,
+                Self.overnightNetLabel: Color.red,
                 Self.buyAndHoldLabel: Color.blue
             ])
             .chartYAxis {
