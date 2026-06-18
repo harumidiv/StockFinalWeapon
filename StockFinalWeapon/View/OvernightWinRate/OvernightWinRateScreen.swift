@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Combine
+import Charts
 
 /// 集計期間
 enum WinRatePeriod: String, CaseIterable, Identifiable {
@@ -31,6 +32,14 @@ enum WinRatePeriod: String, CaseIterable, Identifiable {
     }
 }
 
+/// 資産推移チャートの1点（初期投資額をそろえて2戦略を比較する）
+struct OvernightEquityPoint: Identifiable {
+    var id: Date { date }
+    let date: Date
+    let overnight: Double  // オーバーナイト戦略（引け買い→翌寄り売りを毎日繰り返した）評価額（円）
+    let buyAndHold: Double // 100株をずっと保有した場合の評価額（円）
+}
+
 /// 集計結果
 struct OvernightWinRateResult {
     let code: String
@@ -42,6 +51,7 @@ struct OvernightWinRateResult {
     let averageReturn: Double    // 1トレードあたり平均損益率（％）
     let cumulativeReturn: Double // 期間中ずっと繰り返した場合の累積リターン（％）
     let buyAndHoldReturn: Double // 期間中ずっと保有した場合の上昇率（％）
+    let equityCurve: [OvernightEquityPoint] // 資産推移（2戦略の比較用）
     let startDate: Date?
     let endDate: Date?
 }
@@ -64,6 +74,17 @@ extension OvernightWinRateResult {
         var returnSum = 0.0
         var cumulative = 1.0
 
+        // 初期投資額をそろえる（最初の終値で 100株 買った金額）
+        let shares = 100.0
+        let firstClose = bars.first!.close
+        let initialCapital = Double(firstClose) * shares
+        var overnightEquity = initialCapital
+
+        // 1点目（取引前。両戦略とも初期投資額からスタート）
+        var equityCurve: [OvernightEquityPoint] = [
+            OvernightEquityPoint(date: bars[0].date, overnight: initialCapital, buyAndHold: initialCapital)
+        ]
+
         // 当日終値で買い、翌日始値で売る
         for i in 0..<(bars.count - 1) {
             let buy = bars[i].close
@@ -79,12 +100,18 @@ extension OvernightWinRateResult {
             } else {
                 draws += 1
             }
+
+            // 翌日（取引完了時点）の評価額を記録
+            overnightEquity *= (1 + ret)
+            let buyAndHoldEquity = Double(bars[i + 1].close) * shares
+            equityCurve.append(
+                OvernightEquityPoint(date: bars[i + 1].date, overnight: overnightEquity, buyAndHold: buyAndHoldEquity)
+            )
         }
 
         let total = bars.count - 1
 
         // 期間中ずっと保有した場合の上昇率（最初の終値で買い、最後の終値で売る）
-        let firstClose = bars.first!.close
         let lastClose = bars.last!.close
         let buyAndHoldReturn = Double(lastClose - firstClose) / Double(firstClose) * 100
 
@@ -98,6 +125,7 @@ extension OvernightWinRateResult {
             averageReturn: returnSum / Double(total) * 100,
             cumulativeReturn: (cumulative - 1) * 100,
             buyAndHoldReturn: buyAndHoldReturn,
+            equityCurve: equityCurve,
             startDate: bars.first?.date,
             endDate: bars.last?.date
         )
@@ -322,12 +350,68 @@ struct OvernightWinRateResultCard: View {
                 value: String(format: "%+.2f%%", result.buyAndHoldReturn),
                 color: result.buyAndHoldReturn >= 0 ? .red : .blue
             )
+
+            if result.equityCurve.count >= 2 {
+                Divider()
+                equityChart
+            }
         }
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(.secondarySystemBackground))
         )
+    }
+
+    private static let overnightLabel = "オーバーナイト戦略（複利）"
+    private static let buyAndHoldLabel = "100株ずっと保有"
+
+    /// 初期投資額をそろえた2戦略の資産推移チャート
+    @ViewBuilder
+    private var equityChart: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("資産推移（初期投資 = 最初の終値で100株購入）")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            Chart(result.equityCurve) { point in
+                LineMark(
+                    x: .value("日付", point.date),
+                    y: .value("評価額", point.overnight)
+                )
+                .foregroundStyle(by: .value("系列", Self.overnightLabel))
+
+                LineMark(
+                    x: .value("日付", point.date),
+                    y: .value("評価額", point.buyAndHold)
+                )
+                .foregroundStyle(by: .value("系列", Self.buyAndHoldLabel))
+            }
+            .chartForegroundStyleScale([
+                Self.overnightLabel: Color.orange,
+                Self.buyAndHoldLabel: Color.blue
+            ])
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let yen = value.as(Double.self) {
+                            Text(Self.yenAxisText(yen))
+                        }
+                    }
+                }
+            }
+            .chartLegend(position: .bottom, spacing: 8)
+            .frame(height: 220)
+        }
+    }
+
+    /// Y軸ラベル用に円を「万」単位で短く表示する
+    static func yenAxisText(_ yen: Double) -> String {
+        if abs(yen) >= 10_000 {
+            return String(format: "%.0f万", yen / 10_000)
+        }
+        return String(format: "%.0f", yen)
     }
 
     @ViewBuilder
