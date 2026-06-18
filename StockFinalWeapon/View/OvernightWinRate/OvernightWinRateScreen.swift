@@ -41,6 +41,16 @@ struct OvernightEquityPoint: Identifiable {
     let buyAndHold: Double   // 100株をずっと保有した場合の評価額（円）
 }
 
+/// 年ごとのパフォーマンス（複数年にまたがる検索時に表示）
+struct OvernightYearlyPerformance: Identifiable {
+    var id: Int { year }
+    let year: Int
+    let trades: Int              // その年のトレード回数
+    let winRate: Double          // その年の勝率（％）
+    let overnightProfit: Double  // その年のオーバーナイト戦略損益（円・100株単利）
+    let buyAndHoldProfit: Double // その年の保有損益（円・100株、年初終値→年末終値）
+}
+
 /// 集計結果
 struct OvernightWinRateResult {
     let code: String
@@ -53,6 +63,7 @@ struct OvernightWinRateResult {
     let cumulativeReturn: Double // 期間中ずっと繰り返した場合の累積リターン（％）
     let buyAndHoldReturn: Double // 期間中ずっと保有した場合の上昇率（％）
     let equityCurve: [OvernightEquityPoint] // 資産推移（2戦略の比較用）
+    let yearlyPerformance: [OvernightYearlyPerformance] // 年ごとの成績（複数年のときのみ要素を持つ）
     let startDate: Date?
     let endDate: Date?
 }
@@ -133,6 +144,37 @@ extension OvernightWinRateResult {
         let lastClose = bars.last!.close
         let buyAndHoldReturn = Double(lastClose - firstClose) / Double(firstClose) * 100
 
+        // 年ごとの成績を集計（保有損益は各年の最初の終値→最後の終値）
+        var yearly: [Int: (trades: Int, wins: Int, overnightProfit: Double, firstClose: Float, lastClose: Float)] = [:]
+        for bar in bars {
+            let y = calendar.component(.year, from: bar.date)
+            if var e = yearly[y] {
+                e.lastClose = bar.close
+                yearly[y] = e
+            } else {
+                yearly[y] = (trades: 0, wins: 0, overnightProfit: 0, firstClose: bar.close, lastClose: bar.close)
+            }
+        }
+        // オーバーナイトのトレード成績は、決済日（翌寄り）の年に計上
+        for i in 0..<(bars.count - 1) {
+            let y = calendar.component(.year, from: bars[i + 1].date)
+            guard var e = yearly[y] else { continue }
+            e.trades += 1
+            if bars[i + 1].open > bars[i].close { e.wins += 1 }
+            e.overnightProfit += Double(bars[i + 1].open - bars[i].close) * shares
+            yearly[y] = e
+        }
+        let yearlyPerformance: [OvernightYearlyPerformance] = yearly.keys.sorted().map { y in
+            let e = yearly[y]!
+            return OvernightYearlyPerformance(
+                year: y,
+                trades: e.trades,
+                winRate: e.trades > 0 ? Double(e.wins) / Double(e.trades) * 100 : 0,
+                overnightProfit: e.overnightProfit,
+                buyAndHoldProfit: Double(e.lastClose - e.firstClose) * shares
+            )
+        }
+
         return OvernightWinRateResult(
             code: code,
             totalTrades: total,
@@ -144,6 +186,7 @@ extension OvernightWinRateResult {
             cumulativeReturn: (overnightEquity - initialCapital) / initialCapital * 100,
             buyAndHoldReturn: buyAndHoldReturn,
             equityCurve: equityCurve,
+            yearlyPerformance: yearlyPerformance,
             startDate: bars.first?.date,
             endDate: bars.last?.date
         )
@@ -373,6 +416,11 @@ struct OvernightWinRateResultCard: View {
                 Divider()
                 equityChart
             }
+
+            if result.yearlyPerformance.count >= 2 {
+                Divider()
+                yearlyList
+            }
         }
         .padding()
         .background(
@@ -430,6 +478,54 @@ struct OvernightWinRateResultCard: View {
             .chartLegend(position: .bottom, spacing: 8)
             .frame(height: 220)
         }
+    }
+
+    /// 年ごとのパフォーマンス一覧
+    @ViewBuilder
+    private var yearlyList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("年ごとの成績（100株）")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            // ヘッダー
+            HStack {
+                Text("年").frame(width: 52, alignment: .leading)
+                Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("オーバーナイト").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("ずっと保有").frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+
+            ForEach(result.yearlyPerformance) { y in
+                HStack {
+                    Text(verbatim: "\(y.year)")
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .frame(width: 52, alignment: .leading)
+                    Text(y.trades > 0 ? String(format: "%.0f%%", y.winRate) : "—")
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .foregroundColor(.secondary)
+                    Text(Self.signedYenText(y.overnightProfit))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .foregroundColor(y.overnightProfit >= 0 ? .red : .blue)
+                    Text(Self.signedYenText(y.buyAndHoldProfit))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .foregroundColor(y.buyAndHoldProfit >= 0 ? .red : .blue)
+                }
+                .font(.system(size: 13, design: .monospaced))
+            }
+        }
+    }
+
+    /// 損益を符号付きの円表示にする（例: +12,300円 / -3,400円）
+    static func signedYenText(_ yen: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        let absText = f.string(from: NSNumber(value: abs(yen))) ?? "0"
+        let sign = yen >= 0 ? "+" : "-"
+        return "\(sign)\(absText)円"
     }
 
     /// Y軸ラベル用に円を「万」単位で短く表示する
