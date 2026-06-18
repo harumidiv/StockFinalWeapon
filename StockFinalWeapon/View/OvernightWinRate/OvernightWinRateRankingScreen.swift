@@ -142,16 +142,41 @@ final class OvernightWinRateRankingViewModel: ObservableObject {
     }
 }
 
+/// 一覧の並び順
+enum WinRateRankingSort: String, CaseIterable, Identifiable {
+    case winRate = "勝率"
+    case cumulative = "累積"
+    var id: Self { self }
+
+    var headerSuffix: String {
+        switch self {
+        case .winRate: return "勝率が高い順"
+        case .cumulative: return "累積リターンが高い順"
+        }
+    }
+}
+
 struct OvernightWinRateRankingScreen: View {
     @StateObject private var viewModel = OvernightWinRateRankingViewModel()
     @State private var rangeMode: WinRateRangeMode = .custom
     @State private var period: WinRatePeriod = .oneYear
     @State private var startDate: Date
     @State private var endDate: Date
+    @State private var sortKey: WinRateRankingSort = .winRate
 
     init(start: Date, end: Date) {
         _startDate = State(initialValue: start)
         _endDate = State(initialValue: end)
+    }
+
+    /// 並び順に応じて並べ替えた行（再取得は不要、その場で並べ替えるだけ）
+    private var sortedRows: [RankedWinRateRow] {
+        switch sortKey {
+        case .winRate:
+            return viewModel.rows.sorted { $0.result.winRate > $1.result.winRate }
+        case .cumulative:
+            return viewModel.rows.sorted { $0.result.cumulativeReturn > $1.result.cumulativeReturn }
+        }
     }
 
     /// 現在のモードに応じた集計期間（開始日・終了日）
@@ -251,20 +276,32 @@ struct OvernightWinRateRankingScreen: View {
             Spacer()
         } else {
             let range = resolvedRange
-            List {
-                Section {
-                    ForEach(Array(viewModel.rows.enumerated()), id: \.element.id) { index, row in
-                        NavigationLink {
-                            OvernightWinRateDetailScreen(row: row, start: range.start, end: range.end)
-                        } label: {
-                            rankingRow(order: index + 1, row: row)
-                        }
+            VStack(spacing: 0) {
+                // 並び順の切り替え（勝率／累積）
+                Picker("並び順", selection: $sortKey) {
+                    ForEach(WinRateRankingSort.allCases) { s in
+                        Text(s.rawValue).tag(s)
                     }
-                } header: {
-                    Text("\(OvernightWinRateResultCard.dateText(range.start)) 〜 \(OvernightWinRateResultCard.dateText(range.end))・勝率が高い順")
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
+                List {
+                    Section {
+                        ForEach(Array(sortedRows.enumerated()), id: \.element.id) { index, row in
+                            NavigationLink {
+                                OvernightWinRateDetailScreen(row: row, start: range.start, end: range.end)
+                            } label: {
+                                rankingRow(order: index + 1, row: row)
+                            }
+                        }
+                    } header: {
+                        Text("\(OvernightWinRateResultCard.dateText(range.start)) 〜 \(OvernightWinRateResultCard.dateText(range.end))・\(sortKey.headerSuffix)")
+                    }
+                }
+                .listStyle(.plain)
             }
-            .listStyle(.plain)
         }
     }
 
