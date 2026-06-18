@@ -337,6 +337,9 @@ struct OvernightWinRateRankingScreen: View {
                 Text(String(format: "累積%+.1f%%", row.result.cumulativeReturn))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.secondary)
+                Text(String(format: "保有%+.1f%%", row.result.buyAndHoldReturn))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
             }
         }
         .padding(.vertical, 4)
