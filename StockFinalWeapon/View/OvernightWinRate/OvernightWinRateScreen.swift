@@ -177,12 +177,6 @@ struct OvernightWinRateScreen: View {
         }
     }
 
-    /// すでに結果（またはエラー）が表示されている場合のみ再計算する
-    private func recalculateIfNeeded() {
-        guard viewModel.result != nil || viewModel.errorMessage != nil else { return }
-        Task { await runCalculation() }
-    }
-
     /// 現在のモードに応じた集計期間（開始日・終了日）。ランキング一覧へ引き継ぐ。
     private var resolvedRange: (start: Date, end: Date) {
         switch rangeMode {
@@ -277,11 +271,6 @@ struct OvernightWinRateScreen: View {
                     }
                 }
             }
-            // 期間・指定方法・日付を変えたら、すでに結果がある場合は再計算
-            .onChange(of: period) { _, _ in recalculateIfNeeded() }
-            .onChange(of: rangeMode) { _, _ in recalculateIfNeeded() }
-            .onChange(of: startDate) { _, _ in recalculateIfNeeded() }
-            .onChange(of: endDate) { _, _ in recalculateIfNeeded() }
         }
     }
 }
