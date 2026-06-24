@@ -21,6 +21,9 @@ struct MomentumStockInfo: Identifiable {
     let marketCap: String // 時価総額
     let url: String
     let isUwabanareNarabiAka: Bool // 日足が「上放れ並び赤」かどうか
+    let isAkaSanpei: Bool // 日足が「赤三兵」かどうか
+    let isAkeNoMyojo: Bool // 日足が「明けの明星」かどうか
+    let isSankuTatakikomi: Bool // 日足が「三空叩き込み」かどうか
 
     // 騰落率（％）を計算するプロパティ
     var changePercentage: Double {
@@ -154,8 +157,8 @@ class StockViewModel: ObservableObject {
             
             let linkCharturl = urlString + "/chart?frm=dly..."
 
-            // 日足を取得して「上放れ並び赤」かどうかを判定
-            let isUwabanare = await detectUwabanareNarabiAka(code: code)
+            // 日足を1回だけ取得し、各ローソク足パターンをまとめて判定する（通信は1銘柄1回）
+            let patterns = await detectCandlePatterns(code: code)
 
             return MomentumStockInfo(
                 rank: rank,
@@ -165,7 +168,10 @@ class StockViewModel: ObservableObject {
                 open: openPrice,
                 marketCap: marketCap,
                 url: linkCharturl,
-                isUwabanareNarabiAka: isUwabanare
+                isUwabanareNarabiAka: patterns.uwabanareNarabiAka,
+                isAkaSanpei: patterns.akaSanpei,
+                isAkeNoMyojo: patterns.akeNoMyojo,
+                isSankuTatakikomi: patterns.sankuTatakikomi
             )
             
         } catch {
@@ -174,19 +180,44 @@ class StockViewModel: ObservableObject {
         }
     }
     
-    /// 日足チャートを取得し「上放れ並び赤」パターンかどうかを判定する
-    private func detectUwabanareNarabiAka(code: String) async -> Bool {
+    /// 日足のOHLC（日付昇順）
+    private typealias Bar = (date: Date, open: Float, high: Float, low: Float, close: Float)
+
+    /// 各ローソク足パターンの判定結果
+    private struct CandlePatternResult {
+        var uwabanareNarabiAka = false
+        var akaSanpei = false
+        var akeNoMyojo = false
+        var sankuTatakikomi = false
+    }
+
+    /// 日足チャートを1回だけ取得し、各ローソク足パターンをまとめて判定する。
+    /// 全パターンが同じ日足データを使い回すため、追加の通信は発生しない。
+    private func detectCandlePatterns(code: String) async -> CandlePatternResult {
         let end = Date()
-        // 直近3営業日ぶんを確実に取得するため、休日を考慮して20日前から取得
-        guard let start = Calendar.current.date(byAdding: .day, value: -20, to: end) else { return false }
+        // 直近数営業日ぶんを確実に取得するため、休日を考慮して20日前から取得
+        guard let start = Calendar.current.date(byAdding: .day, value: -20, to: end) else { return CandlePatternResult() }
 
         let result = await YahooYFinanceAPIService().fetchStockChartData(code: code, startDate: start, endDate: end)
-        switch result {
-        case .success(let candles):
-            return isUwabanareNarabiAka(candles: candles)
-        case .failure:
-            return false
-        }
+        guard case .success(let candles) = result else { return CandlePatternResult() }
+
+        let bars = sortedBars(from: candles)
+        return CandlePatternResult(
+            uwabanareNarabiAka: isUwabanareNarabiAka(bars: bars),
+            akaSanpei: isAkaSanpei(bars: bars),
+            akeNoMyojo: isAkeNoMyojo(bars: bars),
+            sankuTatakikomi: isSankuTatakikomi(bars: bars)
+        )
+    }
+
+    /// 有効なOHLCのみを日付昇順に並べる
+    private func sortedBars(from candles: [MyStockChartData]) -> [Bar] {
+        candles
+            .compactMap { c -> Bar? in
+                guard let d = c.date, let o = c.open, let h = c.high, let l = c.low, let cl = c.close else { return nil }
+                return (d, o, h, l, cl)
+            }
+            .sorted { $0.date < $1.date }
     }
 
     /// 「上放れ並び赤」判定（標準）
@@ -195,15 +226,7 @@ class StockViewModel: ObservableObject {
     /// - B・Cがともに陽線（赤）
     /// - Cの始値がBの始値の±2%以内（並び）
     /// - B・Cの実体の長さが概ね同程度（小さい方/大きい方 >= 0.5）
-    private func isUwabanareNarabiAka(candles: [MyStockChartData]) -> Bool {
-        // 有効なOHLCのみを日付昇順に並べる
-        let bars = candles
-            .compactMap { c -> (date: Date, open: Float, high: Float, low: Float, close: Float)? in
-                guard let d = c.date, let o = c.open, let h = c.high, let l = c.low, let cl = c.close else { return nil }
-                return (d, o, h, l, cl)
-            }
-            .sorted { $0.date < $1.date }
-
+    private func isUwabanareNarabiAka(bars: [Bar]) -> Bool {
         guard bars.count >= 3 else { return false }
         let a = bars[bars.count - 3]
         let b = bars[bars.count - 2]
@@ -228,6 +251,81 @@ class StockViewModel: ObservableObject {
         return true
     }
 
+    /// 「赤三兵」判定（上昇転換／継続）
+    /// 直近3本 [A, B, C] について、
+    /// - 3本ともしっかりした陽線（実体がレンジの50%以上）
+    /// - 終値が切り上がり（A.close < B.close < C.close）
+    /// - 各始値が前日の実体内から始まる（だましの飛び乗りを除外）
+    /// - 上ヒゲが短い（実体以下＝「先詰まり」の弱い三兵を除外）
+    private func isAkaSanpei(bars: [Bar]) -> Bool {
+        guard bars.count >= 3 else { return false }
+        let trio = [bars[bars.count - 3], bars[bars.count - 2], bars[bars.count - 1]]
+
+        // 3本とも陽線で、実体がしっかりある
+        for bar in trio {
+            guard bar.close > bar.open else { return false }
+            let range = bar.high - bar.low
+            guard range > 0, (bar.close - bar.open) / range >= 0.5 else { return false }
+            // 上ヒゲが実体より短い
+            guard bar.high - bar.close <= bar.close - bar.open else { return false }
+        }
+
+        // 終値が連続で切り上がる
+        guard trio[0].close < trio[1].close, trio[1].close < trio[2].close else { return false }
+
+        // 各始値が前日の実体内（前日始値〜前日終値）から始まる
+        for i in 1..<3 {
+            let prev = trio[i - 1]
+            let cur = trio[i]
+            guard cur.open >= prev.open, cur.open <= prev.close else { return false }
+        }
+
+        return true
+    }
+
+    /// 「明けの明星」判定（底打ち反転）
+    /// 直近3本 [A(陰線), B(小さな星), C(陽線)] について、
+    /// - Aは実体の大きい陰線（下降を示す）
+    /// - Bは小さな実体で、Aの実体より下に窓を空けて出る（売られすぎ）
+    /// - Cは陽線で、Aの実体の中心より上まで戻す
+    private func isAkeNoMyojo(bars: [Bar]) -> Bool {
+        guard bars.count >= 3 else { return false }
+        let a = bars[bars.count - 3]
+        let b = bars[bars.count - 2]
+        let c = bars[bars.count - 1]
+
+        // A: 実体の大きい陰線
+        let rangeA = a.high - a.low
+        guard a.close < a.open, rangeA > 0, (a.open - a.close) / rangeA >= 0.5 else { return false }
+
+        // B: 小さな実体（星）。Aの実体に対して十分小さい
+        let bodyA = a.open - a.close
+        let bodyB = abs(b.close - b.open)
+        guard bodyA > 0, bodyB <= bodyA * 0.5 else { return false }
+
+        // B はAの終値より下に窓を空けて出る（実体の上端がA.close未満）
+        guard max(b.open, b.close) < a.close else { return false }
+
+        // C: 陽線で、Aの実体の中心より上まで戻す
+        let midA = (a.open + a.close) / 2
+        guard c.close > c.open, c.close > midA else { return false }
+
+        return true
+    }
+
+    /// 「三空叩き込み」判定（売られすぎからの反転買いサイン）
+    /// 直近4本について、隣り合う足が連続で3つ下方向の窓（前日安値 > 当日高値）を空ける。
+    private func isSankuTatakikomi(bars: [Bar]) -> Bool {
+        guard bars.count >= 4 else { return false }
+        let quad = Array(bars.suffix(4))
+
+        // 3連続の下方向の窓
+        for i in 1..<4 {
+            guard quad[i - 1].low > quad[i].high else { return false }
+        }
+        return true
+    }
+
     private func fetchOpenPrice(code: String) async -> Int? {
         let url = URL(string: "https://finance.yahoo.co.jp/quote/\(code).T")!
         do {
@@ -245,7 +343,23 @@ class StockViewModel: ObservableObject {
 
 struct MomentamRankingScreen: View {
     @StateObject var viewModel = StockViewModel()
-    
+
+    /// 酒田五法系の上昇パターンを示すバッジ
+    private func patternBadge(_ title: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "flame.fill")
+            Text(title)
+        }
+        .font(.system(size: 11, weight: .bold))
+        .foregroundColor(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.red)
+        )
+    }
+
     var body: some View {
         NavigationView {
             ZStack { // 重ね合わせができるようにZStackを使用
@@ -281,18 +395,16 @@ struct MomentamRankingScreen: View {
                                             .font(.system(size: 12, design: .monospaced))
                                             .foregroundColor(stock.isUnderOneTrillion ? .orange : .secondary)
                                         if stock.isUwabanareNarabiAka {
-                                            HStack(spacing: 3) {
-                                                Image(systemName: "flame.fill")
-                                                Text("上放れ並び赤")
-                                            }
-                                            .font(.system(size: 11, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 4)
-                                                    .fill(Color.red)
-                                            )
+                                            patternBadge("上放れ並び赤")
+                                        }
+                                        if stock.isAkaSanpei {
+                                            patternBadge("赤三兵")
+                                        }
+                                        if stock.isAkeNoMyojo {
+                                            patternBadge("明けの明星")
+                                        }
+                                        if stock.isSankuTatakikomi {
+                                            patternBadge("三空叩き込み")
                                         }
                                     }
                                     Spacer()
