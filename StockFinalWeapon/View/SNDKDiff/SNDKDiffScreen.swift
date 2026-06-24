@@ -13,6 +13,8 @@ class SNDKDiffViewModel: ObservableObject {
     @Published var usdJpy: Double?
     @Published var sndkMarketCapThousandUSD: Double?
     @Published var kioxia: KioxiaData?
+    @Published var sndkRSI: Double?   // SNDK（サンディスク）の日足RSI(14)
+    @Published var kioxiaRSI: Double? // キオクシア(285A)の日足RSI(14)
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -49,14 +51,35 @@ class SNDKDiffViewModel: ObservableObject {
         async let sndkResult = fetchSNDKMarketCap()
         async let rateResult = fetchUSDJPY()
         async let kioxiaResult = fetchKioxia()
+        async let sndkRSIResult = fetchRSI(identifier: "SNDK")
+        async let kioxiaRSIResult = fetchRSI(identifier: "285A.T")
 
-        let (sndk, rate, kioxiaData) = await (sndkResult, rateResult, kioxiaResult)
+        let (sndk, rate, kioxiaData, sndkRSIValue, kioxiaRSIValue) =
+            await (sndkResult, rateResult, kioxiaResult, sndkRSIResult, kioxiaRSIResult)
 
         DispatchQueue.main.async {
             self.sndkMarketCapThousandUSD = sndk
             self.usdJpy = rate
             self.kioxia = kioxiaData
+            self.sndkRSI = sndkRSIValue
+            self.kioxiaRSI = kioxiaRSIValue
             self.isLoading = false
+        }
+    }
+
+    /// 日足チャートを取得してRSIを計算する。
+    /// 楽天証券マーケットスピードの「短期」に合わせ、期間9・単純合計（カトラー式）で算出する。
+    /// SwiftYFinanceのidentifierをそのまま使う（米国株は"SNDK"、東証は"285A.T"）。
+    private func fetchRSI(identifier: String, period: Int = 9) async -> Double? {
+        let end = Date()
+        // 休日も考慮して約120日ぶんの日足を取得
+        guard let start = Calendar.current.date(byAdding: .day, value: -120, to: end) else { return nil }
+        do {
+            let closes = try await SwiftYFinanceHelper.fetchDailyCloses(identifier: identifier, start: start, end: end)
+            return RSICalculator.rsi(closes: closes, period: period, method: .simple)
+        } catch {
+            print("\(identifier) のRSI取得失敗: \(error)")
+            return nil
         }
     }
 
@@ -130,13 +153,13 @@ struct SNDKDiffScreen: View {
                     }
 
                     // SNDK
-                    SectionHeader(title: "SNDK（サンディスク）")
+                    SectionHeader(title: "SNDK（サンディスク）", rsi: viewModel.sndkRSI, overheatThreshold: 80)
                     if let cap = viewModel.sndkMarketCapJPY {
                         InfoCard(title: "時価総額", value: formatJPY(cap))
                     }
 
                     // キオクシア
-                    SectionHeader(title: "キオクシア（285A）")
+                    SectionHeader(title: "キオクシア（285A）", rsi: viewModel.kioxiaRSI, overheatThreshold: 85)
                     if let k = viewModel.kioxia {
                         InfoCard(title: "現在株価", value: formatYen(k.currentPrice))
                         InfoCard(title: "時価総額", value: formatJPY(k.marketCapJPY))
@@ -223,12 +246,39 @@ struct SNDKDiffScreen: View {
 
 private struct SectionHeader: View {
     let title: String
+    var rsi: Double? = nil  // 指定があれば銘柄名の横にRSI（短期9日）を小さく表示
+    var overheatThreshold: Double? = nil  // このRSI以上で過熱とみなし🔥を表示
+
+    private func rsiColor(_ v: Double) -> Color {
+        if v >= 70 { return .red }   // 買われすぎ
+        if v <= 30 { return .blue }  // 売られすぎ
+        return .secondary
+    }
+
+    private func isOverheated(_ v: Double) -> Bool {
+        guard let threshold = overheatThreshold else { return false }
+        return v >= threshold
+    }
+
     var body: some View {
-        Text(title)
-            .font(.headline)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal)
-            .padding(.top, 4)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            if let rsi {
+                HStack(spacing: 2) {
+                    Text(String(format: "RSI %.1f", rsi))
+                        .font(.caption.bold())
+                        .foregroundColor(rsiColor(rsi))
+                    if isOverheated(rsi) {
+                        Text("🔥").font(.caption)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal)
+        .padding(.top, 4)
     }
 }
 

@@ -20,4 +20,12 @@ final class SwiftYFinanceHelper {
             }
         }
     }
+
+    /// 日足の終値を日付昇順の配列で取得する（RSIなどの指標計算用）
+    static func fetchDailyCloses(identifier: String, start: Date, end: Date) async throws -> [Double] {
+        let data = try await fetchChartData(identifier: identifier, start: start, end: end)
+        return data
+            .sorted { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }
+            .compactMap { $0.close.map(Double.init) }
+    }
 }
