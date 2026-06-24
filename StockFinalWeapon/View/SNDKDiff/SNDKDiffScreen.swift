@@ -143,6 +143,40 @@ class SNDKDiffViewModel: ObservableObject {
 struct SNDKDiffScreen: View {
     @StateObject private var viewModel = SNDKDiffViewModel()
 
+    // 過熱とみなすRSIのしきい値（赤・🔥と背景の色付けで共有）
+    private let sndkOverheat = 80.0
+    private let kioxiaOverheat = 85.0
+
+    // 買われすぎ（黄色背景）とみなすRSIのしきい値
+    private let sndkHot = 75.0
+    private let kioxiaHot = 80.0
+
+    /// 画面全体の過熱度に応じた背景色（opacity込みで返す）
+    /// - 両方が過熱 → 濃い赤（やばさMAX）
+    /// - 片方が過熱 → 赤
+    /// - 買われすぎ（SNDK 75以上 / キオクシア 80以上）のみ → 黄
+    /// - それ以外 → なし
+    private var overheatTint: Color? {
+        func isAtOrAbove(_ rsi: Double?, _ threshold: Double) -> Bool {
+            guard let rsi else { return false }
+            return rsi >= threshold
+        }
+
+        let sndkOver = isAtOrAbove(viewModel.sndkRSI, sndkOverheat)
+        let kioxiaOver = isAtOrAbove(viewModel.kioxiaRSI, kioxiaOverheat)
+
+        if sndkOver && kioxiaOver {
+            return Color.red.opacity(0.45) // 両方過熱 → 濃い赤
+        }
+        if sndkOver || kioxiaOver {
+            return Color.red.opacity(0.25) // 片方過熱
+        }
+        if isAtOrAbove(viewModel.sndkRSI, sndkHot) || isAtOrAbove(viewModel.kioxiaRSI, kioxiaHot) {
+            return Color.yellow.opacity(0.25) // 買われすぎ
+        }
+        return nil
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -153,13 +187,13 @@ struct SNDKDiffScreen: View {
                     }
 
                     // SNDK
-                    SectionHeader(title: "SNDK（サンディスク）", rsi: viewModel.sndkRSI, overheatThreshold: 80)
+                    SectionHeader(title: "SNDK（サンディスク）", rsi: viewModel.sndkRSI, overheatThreshold: sndkOverheat)
                     if let cap = viewModel.sndkMarketCapJPY {
                         InfoCard(title: "時価総額", value: formatJPY(cap))
                     }
 
                     // キオクシア
-                    SectionHeader(title: "キオクシア（285A）", rsi: viewModel.kioxiaRSI, overheatThreshold: 85)
+                    SectionHeader(title: "キオクシア（285A）", rsi: viewModel.kioxiaRSI, overheatThreshold: kioxiaOverheat)
                     if let k = viewModel.kioxia {
                         InfoCard(title: "現在株価", value: formatYen(k.currentPrice))
                         InfoCard(title: "時価総額", value: formatJPY(k.marketCapJPY))
@@ -199,6 +233,18 @@ struct SNDKDiffScreen: View {
                 .padding(.vertical)
                 .frame(maxWidth: .infinity)
             }
+            // 過熱度に応じて画面全体の背景を色付け（買われすぎ→黄 / 過熱→赤）
+            // systemBackgroundの上にtintを重ねるので、ライト/ダークどちらでも色が乗る
+            .background(
+                ZStack {
+                    Color(.systemBackground)
+                    if let overheatTint {
+                        overheatTint
+                    }
+                }
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.3), value: overheatTint)
+            )
             // ローディングは中身を入れ替えず上に重ねる（大きいタイトルの高さ計算が崩れないように）
             .overlay {
                 if viewModel.isLoading {
@@ -270,7 +316,7 @@ private struct SectionHeader: View {
                         .font(.caption.bold())
                         .foregroundColor(rsiColor(rsi))
                     if isOverheated(rsi) {
-                        Text("🔥").font(.caption)
+                        Text("⚠️⚠️⚠️").font(.caption)
                     }
                 }
             }
