@@ -137,11 +137,15 @@ class StockViewModel: ObservableObject {
             var openPrice = 0
             var marketCap = "---" // 初期値
 
+            // 注意: 同じページ内に「東証（通常取引）」と「夜間PTS（時間外取引）」の
+            // 2つの DataList があり、どちらにも「始値」が存在する。
+            // DOM 上は通常取引の始値が先に来るため、最初に見つかった始値のみ採用する。
+            // （以前は後勝ちで上書きしてしまい、PTSの始値を拾って騰落率が狂っていた）
             for item in dataItems {
                 let term = try item.select("dt[class*=DataListItem__term]").text()
                 let valueText = try item.select("dd span[class*=DataListItem__value]").text()
-                
-                if term.contains("始値") {
+
+                if term.contains("始値"), openPrice == 0 {
                     openPrice = parsePrice(valueText)
                 } else if term.contains("時価総額") {
                     marketCap = valueText // 例: "1,234,567百万円" や "1兆2,345億円"
