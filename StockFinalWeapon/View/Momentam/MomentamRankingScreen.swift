@@ -132,7 +132,16 @@ class StockViewModel: ObservableObject {
             // 既存の取得処理
             // Yahoo FinanceのCSSクラス名は末尾にビルドハッシュが付くため、安定部分のみで部分一致させる
             let name = try doc.select("h2[class*=BasePriceBoard__name_]").first()?.text() ?? "不明"
-            let priceText = try doc.select("span[class*=StyledNumber__value]").first()?.text() ?? "0"
+
+            // 「現在値」はメインの価格ブロック内の数値に限定して取得する。
+            // ページ全体に対する .first() だと、時間帯によってレイアウトに
+            // PTS（夜間/時間外取引）の行が増えたとき、その数値を拾ってしまうことがある。
+            // PTSの価格は別ブロック（CommonPriceBoard__ptsPriceRow）にあるため、
+            // メインブロック（CommonPriceBoard__priceBlock）に絞ることで構造的に除外する。
+            let priceBlock = try doc.select("div[class*=CommonPriceBoard__priceBlock]").first()
+            let priceText = try priceBlock?.select("span[class*=StyledNumber__value]").first()?.text()
+                ?? doc.select("span[class*=StyledNumber__value]").first()?.text()
+                ?? "0"
             let price = parsePrice(priceText)
 
             // --- 時価総額と始値の取得 ---

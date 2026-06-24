@@ -49,6 +49,8 @@ struct OvernightYearlyPerformance: Identifiable {
     let winRate: Double          // その年の勝率（％）
     let overnightProfit: Double  // その年のオーバーナイト戦略損益（円・100株単利）
     let buyAndHoldProfit: Double // その年の保有損益（円・100株、年初終値→年末終値）
+    let overnightProfitPercent: Double  // その年のオーバーナイト損益率（年初の評価額=元本に対する％）
+    let buyAndHoldProfitPercent: Double // その年の保有損益率（年初終値に対する％）
 }
 
 /// 集計結果
@@ -197,14 +199,21 @@ extension OvernightWinRateResult {
             let e = yearly[y]!
             let endEquity = yearEndEquity[y] ?? previousYearEndEquity
             let overnightProfit = endEquity - previousYearEndEquity
+            // その年の「元本」= 年初時点の評価額（前年末の評価額。初年度は初期投資額）
+            let yearStartEquity = previousYearEndEquity
             previousYearEndEquity = endEquity
+            let buyAndHoldProfit = Double(e.lastClose - e.firstClose) * shares
             yearlyPerformance.append(
                 OvernightYearlyPerformance(
                     year: y,
                     trades: e.trades,
                     winRate: e.trades > 0 ? Double(e.wins) / Double(e.trades) * 100 : 0,
                     overnightProfit: overnightProfit,
-                    buyAndHoldProfit: Double(e.lastClose - e.firstClose) * shares
+                    buyAndHoldProfit: buyAndHoldProfit,
+                    // 年初の元本に対する損益率
+                    overnightProfitPercent: yearStartEquity != 0 ? overnightProfit / yearStartEquity * 100 : 0,
+                    // 年初終値に対する損益率（= 年初来の株価騰落率）
+                    buyAndHoldProfitPercent: e.firstClose != 0 ? Double(e.lastClose - e.firstClose) / Double(e.firstClose) * 100 : 0
                 )
             )
         }
@@ -594,13 +603,8 @@ struct OvernightWinRateResultCard: View {
                     Text(y.trades > 0 ? String(format: "%.0f%%", y.winRate) : "—")
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .foregroundColor(.secondary)
-                    Text(Self.signedYenText(y.overnightProfit))
-                        .fontWeight(overnightWins ? .bold : .regular)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .foregroundColor(y.overnightProfit >= 0 ? .red : .blue)
-                    Text(Self.signedYenText(y.buyAndHoldProfit))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .foregroundColor(y.buyAndHoldProfit >= 0 ? .red : .blue)
+                    amountCell(yen: y.overnightProfit, percent: y.overnightProfitPercent, bold: overnightWins)
+                    amountCell(yen: y.buyAndHoldProfit, percent: y.buyAndHoldProfitPercent, bold: false)
                 }
                 .font(.system(size: 13, design: .monospaced))
                 .padding(.vertical, 3)
@@ -611,6 +615,28 @@ struct OvernightWinRateResultCard: View {
                 )
             }
         }
+    }
+
+    /// 金額（円）と元本に対する損益率（％）を縦に並べたセル
+    private func amountCell(yen: Double, percent: Double, bold: Bool) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(Self.signedYenText(yen))
+                .fontWeight(bold ? .bold : .regular)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+            Text(Self.signedPercentText(percent))
+                .font(.system(size: 10, design: .monospaced))
+                .opacity(0.75)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .foregroundColor(yen >= 0 ? .red : .blue)
+    }
+
+    /// 損益率を符号付きのパーセント表示にする（例: +12.3% / -3.4%）
+    static func signedPercentText(_ percent: Double) -> String {
+        String(format: "%+.1f%%", percent)
     }
 
     /// 損益を符号付きの円表示にする（例: +12,300円 / -3,400円）
