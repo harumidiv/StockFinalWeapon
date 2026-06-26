@@ -47,6 +47,7 @@ struct OvernightYearlyPerformance: Identifiable {
     let year: Int
     let trades: Int              // その年のトレード回数
     let winRate: Double          // その年の勝率（％）
+    let principal: Double        // その年の元本（年初時点の税・金利控除後の評価額。前年末の手取り評価額。初年度は初期投資額）
     let overnightProfit: Double  // その年のオーバーナイト戦略損益（円・100株単利）
     let buyAndHoldProfit: Double // その年の保有損益（円・100株、年初終値→年末終値）
     let overnightProfitPercent: Double  // その年のオーバーナイト損益率（年初の評価額=元本に対する％）
@@ -190,24 +191,32 @@ extension OvernightWinRateResult {
         }
         // オーバーナイトの年次損益は資産推移カーブの年末評価額の差分で出す（複利・単利どちらにも追従）
         var yearEndEquity: [Int: Double] = [:]
+        // 元本表示用に、税・金利控除後（手取り）の年末評価額も保持する
+        var yearEndNetEquity: [Int: Double] = [:]
         for point in equityCurve {
-            yearEndEquity[calendar.component(.year, from: point.date)] = point.overnight
+            let y = calendar.component(.year, from: point.date)
+            yearEndEquity[y] = point.overnight
+            yearEndNetEquity[y] = point.overnightNet
         }
         var yearlyPerformance: [OvernightYearlyPerformance] = []
         var previousYearEndEquity = initialCapital
+        var previousYearEndNetEquity = initialCapital
         for y in yearly.keys.sorted() {
             let e = yearly[y]!
             let endEquity = yearEndEquity[y] ?? previousYearEndEquity
             let overnightProfit = endEquity - previousYearEndEquity
-            // その年の「元本」= 年初時点の評価額（前年末の評価額。初年度は初期投資額）
+            // その年の「元本」= 年初時点の税・金利控除後の評価額（前年末の手取り評価額。初年度は初期投資額）
             let yearStartEquity = previousYearEndEquity
+            let yearStartNetEquity = previousYearEndNetEquity
             previousYearEndEquity = endEquity
+            previousYearEndNetEquity = yearEndNetEquity[y] ?? previousYearEndNetEquity
             let buyAndHoldProfit = Double(e.lastClose - e.firstClose) * shares
             yearlyPerformance.append(
                 OvernightYearlyPerformance(
                     year: y,
                     trades: e.trades,
                     winRate: e.trades > 0 ? Double(e.wins) / Double(e.trades) * 100 : 0,
+                    principal: yearStartNetEquity,
                     overnightProfit: overnightProfit,
                     buyAndHoldProfit: buyAndHoldProfit,
                     // 年初の元本に対する損益率
@@ -582,6 +591,7 @@ struct OvernightWinRateResultCard: View {
             HStack {
                 Text("年").frame(width: 64, alignment: .leading)
                 Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("元本").frame(maxWidth: .infinity, alignment: .trailing)
                 Text("オーバーナイト").frame(maxWidth: .infinity, alignment: .trailing)
                 Text("ずっと保有").frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -603,6 +613,11 @@ struct OvernightWinRateResultCard: View {
                     Text(y.trades > 0 ? String(format: "%.0f%%", y.winRate) : "—")
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .foregroundColor(.secondary)
+                    Text(Self.plainYenText(y.principal))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                     amountCell(yen: y.overnightProfit, percent: y.overnightProfitPercent, bold: overnightWins)
                     amountCell(yen: y.buyAndHoldProfit, percent: y.buyAndHoldProfitPercent, bold: false)
                 }
@@ -647,6 +662,15 @@ struct OvernightWinRateResultCard: View {
         let absText = f.string(from: NSNumber(value: abs(yen))) ?? "0"
         let sign = yen >= 0 ? "+" : "-"
         return "\(sign)\(absText)円"
+    }
+
+    /// 元本など符号なしの円表示にする（例: 123,000円）
+    static func plainYenText(_ yen: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        let text = f.string(from: NSNumber(value: yen)) ?? "0"
+        return "\(text)円"
     }
 
     /// Y軸ラベル用に円を「万」単位で短く表示する
