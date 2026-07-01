@@ -32,6 +32,40 @@ enum WinRatePeriod: String, CaseIterable, Identifiable {
     }
 }
 
+/// 検証する売買戦略
+enum WinRateStrategy: String, CaseIterable, Identifiable {
+    /// 当日終値で買い、翌日始値で売る（オーバーナイト保有）
+    case overnight
+    /// 当日始値で買い、当日終値で売る（デイトレード・日計り）
+    case intraday
+
+    var id: Self { self }
+
+    /// 画面タイトル
+    var navigationTitle: String {
+        switch self {
+        case .overnight: return "引in→寄out 勝率"
+        case .intraday: return "寄in→引out 勝率"
+        }
+    }
+
+    /// 入力フォーム上部の説明文
+    var formDescription: String {
+        switch self {
+        case .overnight: return "当日の終値で買い、翌日の始値で売った場合（オーバーナイト保有）の勝率を集計します。"
+        case .intraday: return "当日の始値で買い、当日の終値で売った場合（デイトレード）の勝率を集計します。"
+        }
+    }
+
+    /// チャート凡例や成績表で使う戦略の短い名前
+    var shortLabel: String {
+        switch self {
+        case .overnight: return "オーバーナイト"
+        case .intraday: return "デイトレ"
+        }
+    }
+}
+
 /// 資産推移チャートの1点（初期投資額をそろえて各戦略を比較する）
 struct OvernightEquityPoint: Identifiable {
     var id: Date { date }
@@ -57,6 +91,7 @@ struct OvernightYearlyPerformance: Identifiable {
 /// 集計結果
 struct OvernightWinRateResult {
     let code: String
+    let strategy: WinRateStrategy // 検証した売買戦略（引→翌寄 / 寄→引）
     let totalTrades: Int    // トレード回数
     let wins: Int           // 勝ち（翌日始値 > 当日終値）
     let losses: Int         // 負け（翌日始値 < 当日終値）
@@ -74,12 +109,13 @@ struct OvernightWinRateResult {
 }
 
 extension OvernightWinRateResult {
-    /// 取得したローソク足から「終値で買い、翌日始値で売る」戦略の集計結果を作る。
+    /// 取得したローソク足から、指定した戦略（引→翌寄 / 寄→引）の集計結果を作る。
     /// 有効データが2本未満の場合は nil を返す。
     /// - Parameters:
+    ///   - strategy: .overnight=当日終値で買い翌日始値で売る / .intraday=当日始値で買い当日終値で売る
     ///   - compounding: true=複利（損益を再投資して建玉を増やす）, false=単利（100株固定）
     ///   - lotSize: 複利時の売買単位（1=1株単位, 100=100株単位）。余りは現金として持ち越す。
-    static func make(code: String, candles: [MyStockChartData], compounding: Bool, lotSize: Int) -> OvernightWinRateResult? {
+    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int) -> OvernightWinRateResult? {
         // 有効な始値・終値のみを日付昇順に整理
         let bars = candles
             .compactMap { c -> (date: Date, open: Float, close: Float)? in
@@ -106,18 +142,35 @@ extension OvernightWinRateResult {
         let annualInterestRate = 0.028 // 信用金利 年2.8%
         let calendar = Calendar.current
 
-        var overnightEquity = initialCapital  // オーバーナイト戦略の評価額（コスト前）
+        var overnightEquity = initialCapital  // 戦略の評価額（コスト前）
         var cumulativeInterest = 0.0          // 累積の信用金利
+
+        // 戦略ごとに1トレード（買値・売値・決済日・決済日の終値・保有日数）の列を作る。
+        // - .overnight: 当日終値で買い、翌日始値で売る（決済日=翌日、翌日まで持ち越すので金利あり）
+        // - .intraday : 当日始値で買い、当日終値で売る（決済日=当日、日計りなので保有日数=0=金利なし）
+        let trades: [(buy: Float, sell: Float, sellDate: Date, sellClose: Float, daysHeld: Int)]
+        switch strategy {
+        case .overnight:
+            trades = (0..<(bars.count - 1)).map { i in
+                let daysHeld = max(1, calendar.dateComponents([.day], from: bars[i].date, to: bars[i + 1].date).day ?? 1)
+                return (bars[i].close, bars[i + 1].open, bars[i + 1].date, bars[i + 1].close, daysHeld)
+            }
+        case .intraday:
+            trades = (0..<bars.count).map { i in
+                (bars[i].open, bars[i].close, bars[i].date, bars[i].close, 0)
+            }
+        }
+
+        guard !trades.isEmpty else { return nil }
 
         // 1点目（取引前。全戦略とも初期投資額からスタート）
         var equityCurve: [OvernightEquityPoint] = [
             OvernightEquityPoint(date: bars[0].date, overnight: initialCapital, overnightNet: initialCapital, buyAndHold: initialCapital)
         ]
 
-        // 当日終値で買い、翌日始値で売る
-        for i in 0..<(bars.count - 1) {
-            let buy = bars[i].close
-            let sell = bars[i + 1].open
+        for t in trades {
+            let buy = t.buy
+            let sell = t.sell
             let ret = Double(sell - buy) / Double(buy)
             returnSum += ret
 
@@ -145,10 +198,9 @@ extension OvernightWinRateResult {
                 heldShares = shares
             }
 
-            // 信用金利: 実際に建てた金額に対し、持ち越した日数ぶん課金
+            // 信用金利: 実際に建てた金額に対し、持ち越した日数ぶん課金（日計り=0日なので発生しない）
             let notional = heldShares * Double(buy)
-            let daysHeld = max(1, calendar.dateComponents([.day], from: bars[i].date, to: bars[i + 1].date).day ?? 1)
-            cumulativeInterest += notional * annualInterestRate * Double(daysHeld) / 365.0
+            cumulativeInterest += notional * annualInterestRate * Double(t.daysHeld) / 365.0
 
             // 評価額の更新（複利=損益を再投資して建玉が育つ / 単利=100株固定の損益をキャッシュ加算）
             overnightEquity += heldShares * Double(sell - buy)
@@ -158,13 +210,13 @@ extension OvernightWinRateResult {
             let netProfit = afterInterest - initialCapital
             let overnightNet = netProfit > 0 ? initialCapital + netProfit * (1 - taxRate) : afterInterest
 
-            let buyAndHoldEquity = Double(bars[i + 1].close) * shares
+            let buyAndHoldEquity = Double(t.sellClose) * shares
             equityCurve.append(
-                OvernightEquityPoint(date: bars[i + 1].date, overnight: overnightEquity, overnightNet: overnightNet, buyAndHold: buyAndHoldEquity)
+                OvernightEquityPoint(date: t.sellDate, overnight: overnightEquity, overnightNet: overnightNet, buyAndHold: buyAndHoldEquity)
             )
         }
 
-        let total = bars.count - 1
+        let total = trades.count
 
         // 期間中ずっと保有した場合の上昇率（最初の終値で買い、最後の終値で売る）
         let lastClose = bars.last!.close
@@ -181,15 +233,15 @@ extension OvernightWinRateResult {
                 yearly[y] = (trades: 0, wins: 0, firstClose: bar.close, lastClose: bar.close)
             }
         }
-        // オーバーナイトのトレード回数・勝ちは、決済日（翌寄り）の年に計上
-        for i in 0..<(bars.count - 1) {
-            let y = calendar.component(.year, from: bars[i + 1].date)
+        // トレード回数・勝ちは、決済日（overnight=翌寄り / intraday=当日引け）の年に計上
+        for t in trades {
+            let y = calendar.component(.year, from: t.sellDate)
             guard var e = yearly[y] else { continue }
             e.trades += 1
-            if bars[i + 1].open > bars[i].close { e.wins += 1 }
+            if t.sell > t.buy { e.wins += 1 }
             yearly[y] = e
         }
-        // オーバーナイトの年次損益は資産推移カーブの年末評価額の差分で出す（複利・単利どちらにも追従）
+        // 戦略の年次損益は資産推移カーブの年末評価額の差分で出す（複利・単利どちらにも追従）
         var yearEndEquity: [Int: Double] = [:]
         // 元本表示用に、税・金利控除後（手取り）の年末評価額も保持する
         var yearEndNetEquity: [Int: Double] = [:]
@@ -229,6 +281,7 @@ extension OvernightWinRateResult {
 
         return OvernightWinRateResult(
             code: code,
+            strategy: strategy,
             totalTrades: total,
             wins: wins,
             losses: losses,
@@ -257,9 +310,16 @@ final class OvernightWinRateViewModel: ObservableObject {
     /// 複利時の売買単位（1=1株単位, 100=100株単位）
     @Published var lotSize = 100
 
+    /// 検証する売買戦略（引→翌寄 / 寄→引）
+    let strategy: WinRateStrategy
+
     // 取得済みのデータ。複利/単利の切り替え時に再取得せず手元で再計算するために保持する。
     private var lastCandles: [MyStockChartData] = []
     private var lastCode: String = ""
+
+    init(strategy: WinRateStrategy = .overnight) {
+        self.strategy = strategy
+    }
 
     /// 今日から period.days 分遡って集計する
     func calculate(code: String, period: WinRatePeriod) async {
@@ -289,7 +349,7 @@ final class OvernightWinRateViewModel: ObservableObject {
         case .success(let candles):
             lastCandles = candles
             lastCode = trimmed
-            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, compounding: isCompounding, lotSize: lotSize) else {
+            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, strategy: strategy, compounding: isCompounding, lotSize: lotSize) else {
                 errorMessage = "データが不足しています。銘柄コードと期間をご確認ください。"
                 isLoading = false
                 return
@@ -306,7 +366,7 @@ final class OvernightWinRateViewModel: ObservableObject {
     /// 複利/単利・売買単位の切り替え時に、取得済みデータから再計算する（通信なし）
     func recompute() {
         guard !lastCandles.isEmpty else { return }
-        result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, compounding: isCompounding, lotSize: lotSize)
+        result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, strategy: strategy, compounding: isCompounding, lotSize: lotSize)
     }
 }
 
@@ -318,13 +378,19 @@ enum WinRateRangeMode: String, CaseIterable, Identifiable {
 }
 
 struct OvernightWinRateScreen: View {
-    @StateObject private var viewModel = OvernightWinRateViewModel()
+    let strategy: WinRateStrategy
+    @StateObject private var viewModel: OvernightWinRateViewModel
     @State private var code: String = ""
     @State private var period: WinRatePeriod = .oneYear
     @State private var rangeMode: WinRateRangeMode = .preset
     @State private var startDate: Date = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
     @State private var endDate: Date = Date()
     @FocusState private var isFocused: Bool
+
+    init(strategy: WinRateStrategy = .overnight) {
+        self.strategy = strategy
+        _viewModel = StateObject(wrappedValue: OvernightWinRateViewModel(strategy: strategy))
+    }
 
     /// 現在のモードに応じて計算を実行
     private func runCalculation() async {
@@ -352,7 +418,7 @@ struct OvernightWinRateScreen: View {
         NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("当日の終値で買い、翌日の始値で売った場合（オーバーナイト保有）の勝率を集計します。")
+                    Text(strategy.formDescription)
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
 
@@ -441,14 +507,17 @@ struct OvernightWinRateScreen: View {
                 }
                 .padding()
             }
-            .navigationTitle("引in→寄out 勝率")
+            .navigationTitle(strategy.navigationTitle)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    NavigationLink {
-                        let range = resolvedRange
-                        OvernightWinRateRankingScreen(start: range.start, end: range.end)
-                    } label: {
-                        Image(systemName: "list.number")
+                // ランキング一覧はオーバーナイト戦略専用。デイトレでは表示しない。
+                if strategy == .overnight {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        NavigationLink {
+                            let range = resolvedRange
+                            OvernightWinRateRankingScreen(start: range.start, end: range.end)
+                        } label: {
+                            Image(systemName: "list.number")
+                        }
                     }
                 }
             }
@@ -522,7 +591,7 @@ struct OvernightWinRateResultCard: View {
     }
 
     private var overnightLabel: String {
-        result.isCompounding ? "オーバーナイト（複利/\(result.lotSize)株単位）" : "オーバーナイト（単利・100株）"
+        result.isCompounding ? "\(result.strategy.shortLabel)（複利/\(result.lotSize)株単位）" : "\(result.strategy.shortLabel)（単利・100株）"
     }
     private static let overnightNetLabel = "税・金利控除後（手取り）"
     private static let buyAndHoldLabel = "ずっと保有（100株）"
@@ -582,7 +651,7 @@ struct OvernightWinRateResultCard: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
-            Label("★ = オーバーナイトがずっと保有を上回った年", systemImage: "star.fill")
+            Label("★ = \(result.strategy.shortLabel)がずっと保有を上回った年", systemImage: "star.fill")
                 .labelStyle(.titleOnly)
                 .font(.system(size: 11))
                 .foregroundColor(.orange)
@@ -592,7 +661,7 @@ struct OvernightWinRateResultCard: View {
                 Text("年").frame(width: 64, alignment: .leading)
                 Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
                 Text("元本").frame(maxWidth: .infinity, alignment: .trailing)
-                Text("オーバーナイト").frame(maxWidth: .infinity, alignment: .trailing)
+                Text(result.strategy.shortLabel).frame(maxWidth: .infinity, alignment: .trailing)
                 Text("ずっと保有").frame(maxWidth: .infinity, alignment: .trailing)
             }
             .font(.system(size: 11))

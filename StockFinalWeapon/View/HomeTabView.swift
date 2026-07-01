@@ -11,6 +11,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case sndkDiff
     case momentam
     case winRate
+    case intradayWinRate
     case yuutaiSakimawari
     case trailing
     case ipo
@@ -28,6 +29,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .momentam: return "モメンタム"
         case .sndkDiff: return "SNDK差分"
         case .winRate: return "勝率"
+        case .intradayWinRate: return "デイトレ"
         case .mypage: return "マイページ"
         }
     }
@@ -41,6 +43,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .momentam: return "bolt.fill"
         case .sndkDiff: return "arrow.left.arrow.right"
         case .winRate: return "percent"
+        case .intradayWinRate: return "sun.max.fill"
         case .mypage: return "person.fill"
         }
     }
@@ -91,11 +94,17 @@ struct HomeTabView: View {
                         }
                         .tag(AppTab.sndkDiff)
                 case .winRate:
-                    OvernightWinRateScreen()
+                    OvernightWinRateScreen(strategy: .overnight)
                         .tabItem {
                             Label(AppTab.winRate.title, systemImage: AppTab.winRate.icon)
                         }
                         .tag(AppTab.winRate)
+                case .intradayWinRate:
+                    OvernightWinRateScreen(strategy: .intraday)
+                        .tabItem {
+                            Label(AppTab.intradayWinRate.title, systemImage: AppTab.intradayWinRate.icon)
+                        }
+                        .tag(AppTab.intradayWinRate)
                 case .mypage:
                     MypageScreen()
                         .tabItem {
