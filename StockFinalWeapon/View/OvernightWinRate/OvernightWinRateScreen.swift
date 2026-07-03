@@ -131,6 +131,8 @@ struct OvernightPeriodPerformance: Identifiable {
     let buyAndHoldProfit: Double // その期間の保有損益（円・100株、期首終値→期末終値）
     let overnightProfitPercent: Double  // その期間のオーバーナイト損益率（期首の評価額=元本に対する％）
     let buyAndHoldProfitPercent: Double // その期間の保有損益率（期首終値に対する％）
+    let buyPrice: Float?   // 買値（日単位=1トレードのときのみ意味を持つ）
+    let sellPrice: Float?  // 売値（同上）
 }
 
 /// 曜日ごとのパフォーマンス（エントリー日=買った日の曜日で集計）
@@ -447,7 +449,8 @@ extension OvernightWinRateResult {
     ) -> [OvernightPeriodPerformance] {
         // 期間バケットを作る（bars は日付昇順なので、初出順 = 時系列順）
         // profitSum=そのバケットのトレード損益合計 / endNet=バケット内最後のトレード後の手取り評価額
-        var buckets: [String: (label: String, trades: Int, wins: Int, profitSum: Double, endNet: Double?, firstClose: Float, lastClose: Float)] = [:]
+        // buyPrice/sellPrice=バケット最初の買値・最後の売値（日単位=1トレードのとき、その日の売買値になる）
+        var buckets: [String: (label: String, trades: Int, wins: Int, profitSum: Double, endNet: Double?, firstClose: Float, lastClose: Float, buyPrice: Float?, sellPrice: Float?)] = [:]
         var order: [String] = []
         for bar in bars {
             let k = breakdown.key(for: bar.date, calendar: calendar)
@@ -455,7 +458,7 @@ extension OvernightWinRateResult {
                 e.lastClose = bar.close
                 buckets[k] = e
             } else {
-                buckets[k] = (label: breakdown.label(for: bar.date, calendar: calendar), trades: 0, wins: 0, profitSum: 0, endNet: nil, firstClose: bar.close, lastClose: bar.close)
+                buckets[k] = (label: breakdown.label(for: bar.date, calendar: calendar), trades: 0, wins: 0, profitSum: 0, endNet: nil, firstClose: bar.close, lastClose: bar.close, buyPrice: nil, sellPrice: nil)
                 order.append(k)
             }
         }
@@ -470,6 +473,8 @@ extension OvernightWinRateResult {
             if t.sell > t.buy { e.wins += 1 }
             e.profitSum += profit
             e.endNet = equityCurve[i + 1].overnightNet
+            if e.buyPrice == nil { e.buyPrice = t.buy }
+            e.sellPrice = t.sell
             buckets[k] = e
         }
 
@@ -494,7 +499,9 @@ extension OvernightWinRateResult {
                     overnightProfit: overnightProfit,
                     buyAndHoldProfit: buyAndHoldProfit,
                     overnightProfitPercent: startEquity != 0 ? overnightProfit / startEquity * 100 : 0,
-                    buyAndHoldProfitPercent: e.firstClose != 0 ? Double(e.lastClose - e.firstClose) / Double(e.firstClose) * 100 : 0
+                    buyAndHoldProfitPercent: e.firstClose != 0 ? Double(e.lastClose - e.firstClose) / Double(e.firstClose) * 100 : 0,
+                    buyPrice: e.buyPrice,
+                    sellPrice: e.sellPrice
                 )
             )
         }
@@ -508,7 +515,7 @@ final class OvernightWinRateViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     /// true=複利（損益を再投資）, false=単利（100株固定）
-    @Published var isCompounding = true
+    @Published var isCompounding = false
     /// 複利時の売買単位（1=1株単位, 100=100株単位）
     @Published var lotSize = 100
 
@@ -1041,30 +1048,45 @@ struct OvernightWinRateResultCard: View {
 
             ForEach(list) { p in
                 let overnightWins = p.overnightProfit > p.buyAndHoldProfit
-                HStack {
-                    HStack(spacing: 3) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 9))
-                            .foregroundColor(.orange)
-                            .opacity(overnightWins ? 1 : 0)
-                        Text(p.label)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                VStack(spacing: 2) {
+                    HStack {
+                        HStack(spacing: 3) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 9))
+                                .foregroundColor(.orange)
+                                .opacity(overnightWins ? 1 : 0)
+                            Text(p.label)
+                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                        }
+                        .frame(width: 68, alignment: .leading)
+                        Text(p.trades > 0 ? String(format: "%.0f%%", p.winRate) : "—")
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(.secondary)
+                        Text(Self.plainYenText(p.principal))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(.secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.5)
+                        amountCell(yen: p.overnightProfit, percent: p.overnightProfitPercent, bold: overnightWins)
+                        amountCell(yen: p.buyAndHoldProfit, percent: p.buyAndHoldProfitPercent, bold: false)
                     }
-                    .frame(width: 68, alignment: .leading)
-                    Text(p.trades > 0 ? String(format: "%.0f%%", p.winRate) : "—")
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .foregroundColor(.secondary)
-                    Text(Self.plainYenText(p.principal))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                    amountCell(yen: p.overnightProfit, percent: p.overnightProfitPercent, bold: overnightWins)
-                    amountCell(yen: p.buyAndHoldProfit, percent: p.buyAndHoldProfitPercent, bold: false)
+                    .font(.system(size: 13, design: .monospaced))
+
+                    // 日単位のときだけ、その日の買値→売値を表示
+                    if breakdown == .day, let buy = p.buyPrice, let sell = p.sellPrice {
+                        HStack(spacing: 4) {
+                            Spacer().frame(width: 68)
+                            Text("買 \(Self.priceText(buy)) → 売 \(Self.priceText(sell))")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                            Spacer()
+                        }
+                    }
                 }
-                .font(.system(size: 13, design: .monospaced))
                 .padding(.vertical, 3)
                 .padding(.horizontal, 4)
                 .background(
@@ -1105,6 +1127,14 @@ struct OvernightWinRateResultCard: View {
         let absText = f.string(from: NSNumber(value: abs(yen))) ?? "0"
         let sign = yen >= 0 ? "+" : "-"
         return "\(sign)\(absText)円"
+    }
+
+    /// 株価を区切り付きで表示する（例: 157,400）
+    static func priceText(_ price: Float) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 1
+        return f.string(from: NSNumber(value: price)) ?? "\(price)"
     }
 
     /// 元本など符号なしの円表示にする（例: 123,000円）
