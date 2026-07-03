@@ -32,6 +32,51 @@ enum WinRatePeriod: String, CaseIterable, Identifiable {
     }
 }
 
+/// 成績一覧の集計単位（年 / 月 / 週 / 日）
+enum WinRateBreakdown: String, CaseIterable, Identifiable {
+    case year = "年"
+    case month = "月"
+    case week = "週"
+    case day = "日"
+
+    var id: Self { self }
+
+    /// バケットをまとめる & 時系列に並べるためのソート可能なキー
+    func key(for date: Date, calendar: Calendar) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        switch self {
+        case .year:
+            return String(format: "%04d", c.year ?? 0)
+        case .month:
+            return String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
+        case .week:
+            // 週はその週の開始日でまとめる（年をまたいでも一意）
+            let start = calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? date
+            let s = calendar.dateComponents([.year, .month, .day], from: start)
+            return String(format: "%04d-%02d-%02d", s.year ?? 0, s.month ?? 0, s.day ?? 0)
+        case .day:
+            return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        }
+    }
+
+    /// 画面表示用のラベル
+    func label(for date: Date, calendar: Calendar) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        switch self {
+        case .year:
+            return String(format: "%04d", c.year ?? 0)
+        case .month:
+            return String(format: "%04d/%02d", c.year ?? 0, c.month ?? 0)
+        case .week:
+            let start = calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? date
+            let s = calendar.dateComponents([.month, .day], from: start)
+            return String(format: "%d/%d〜", s.month ?? 0, s.day ?? 0)
+        case .day:
+            return String(format: "%02d/%02d/%02d", (c.year ?? 0) % 100, c.month ?? 0, c.day ?? 0)
+        }
+    }
+}
+
 /// 検証する売買戦略
 enum WinRateStrategy: String, CaseIterable, Identifiable {
     /// 当日終値で買い、翌日始値で売る（オーバーナイト保有）
@@ -75,17 +120,17 @@ struct OvernightEquityPoint: Identifiable {
     let buyAndHold: Double   // 100株をずっと保有した場合の評価額（円）
 }
 
-/// 年ごとのパフォーマンス（複数年にまたがる検索時に表示）
-struct OvernightYearlyPerformance: Identifiable {
-    var id: Int { year }
-    let year: Int
-    let trades: Int              // その年のトレード回数
-    let winRate: Double          // その年の勝率（％）
-    let principal: Double        // その年の元本（年初時点の税・金利控除後の評価額。前年末の手取り評価額。初年度は初期投資額）
-    let overnightProfit: Double  // その年のオーバーナイト戦略損益（円・100株単利）
-    let buyAndHoldProfit: Double // その年の保有損益（円・100株、年初終値→年末終値）
-    let overnightProfitPercent: Double  // その年のオーバーナイト損益率（年初の評価額=元本に対する％）
-    let buyAndHoldProfitPercent: Double // その年の保有損益率（年初終値に対する％）
+/// 期間ごとのパフォーマンス（年/月/週/日で共通して使う）
+struct OvernightPeriodPerformance: Identifiable {
+    let id: String               // バケットのキー（"2024" / "2024-08" など。時系列にソート可能）
+    let label: String            // 画面表示用ラベル
+    let trades: Int              // その期間のトレード回数
+    let winRate: Double          // その期間の勝率（％）
+    let principal: Double        // その期間の元本（期首時点の税・金利控除後の評価額。前期間末の手取り評価額。最初は初期投資額）
+    let overnightProfit: Double  // その期間のオーバーナイト戦略損益（円）
+    let buyAndHoldProfit: Double // その期間の保有損益（円・100株、期首終値→期末終値）
+    let overnightProfitPercent: Double  // その期間のオーバーナイト損益率（期首の評価額=元本に対する％）
+    let buyAndHoldProfitPercent: Double // その期間の保有損益率（期首終値に対する％）
 }
 
 /// 曜日ごとのパフォーマンス（エントリー日=買った日の曜日で集計）
@@ -134,7 +179,7 @@ struct OvernightWinRateResult {
     let cumulativeReturn: Double // 期間中ずっと繰り返した場合の累積リターン（％）
     let buyAndHoldReturn: Double // 期間中ずっと保有した場合の上昇率（％）
     let equityCurve: [OvernightEquityPoint] // 資産推移（2戦略の比較用）
-    let yearlyPerformance: [OvernightYearlyPerformance] // 年ごとの成績（複数年のときのみ要素を持つ）
+    let periodPerformance: [WinRateBreakdown: [OvernightPeriodPerformance]] // 年/月/週/日ごとの成績
     let weekdayPerformance: [OvernightWeekdayPerformance] // 曜日ごとの成績（エントリー日の曜日で集計）
     let isCompounding: Bool // オーバーナイト戦略を複利で計算したか（false=単利・100株固定）
     let lotSize: Int        // 複利時の売買単位（1株単位 or 100株単位）
@@ -275,60 +320,17 @@ extension OvernightWinRateResult {
         let lastClose = bars.last!.close
         let buyAndHoldReturn = Double(lastClose - firstClose) / Double(firstClose) * 100
 
-        // 年ごとの成績を集計（保有損益は各年の最初の終値→最後の終値）
-        var yearly: [Int: (trades: Int, wins: Int, firstClose: Float, lastClose: Float)] = [:]
-        for bar in bars {
-            let y = calendar.component(.year, from: bar.date)
-            if var e = yearly[y] {
-                e.lastClose = bar.close
-                yearly[y] = e
-            } else {
-                yearly[y] = (trades: 0, wins: 0, firstClose: bar.close, lastClose: bar.close)
-            }
-        }
-        // トレード回数・勝ちは、決済日（overnight=翌寄り / intraday=当日引け）の年に計上
-        for t in trades {
-            let y = calendar.component(.year, from: t.sellDate)
-            guard var e = yearly[y] else { continue }
-            e.trades += 1
-            if t.sell > t.buy { e.wins += 1 }
-            yearly[y] = e
-        }
-        // 戦略の年次損益は資産推移カーブの年末評価額の差分で出す（複利・単利どちらにも追従）
-        var yearEndEquity: [Int: Double] = [:]
-        // 元本表示用に、税・金利控除後（手取り）の年末評価額も保持する
-        var yearEndNetEquity: [Int: Double] = [:]
-        for point in equityCurve {
-            let y = calendar.component(.year, from: point.date)
-            yearEndEquity[y] = point.overnight
-            yearEndNetEquity[y] = point.overnightNet
-        }
-        var yearlyPerformance: [OvernightYearlyPerformance] = []
-        var previousYearEndEquity = initialCapital
-        var previousYearEndNetEquity = initialCapital
-        for y in yearly.keys.sorted() {
-            let e = yearly[y]!
-            let endEquity = yearEndEquity[y] ?? previousYearEndEquity
-            let overnightProfit = endEquity - previousYearEndEquity
-            // その年の「元本」= 年初時点の税・金利控除後の評価額（前年末の手取り評価額。初年度は初期投資額）
-            let yearStartEquity = previousYearEndEquity
-            let yearStartNetEquity = previousYearEndNetEquity
-            previousYearEndEquity = endEquity
-            previousYearEndNetEquity = yearEndNetEquity[y] ?? previousYearEndNetEquity
-            let buyAndHoldProfit = Double(e.lastClose - e.firstClose) * shares
-            yearlyPerformance.append(
-                OvernightYearlyPerformance(
-                    year: y,
-                    trades: e.trades,
-                    winRate: e.trades > 0 ? Double(e.wins) / Double(e.trades) * 100 : 0,
-                    principal: yearStartNetEquity,
-                    overnightProfit: overnightProfit,
-                    buyAndHoldProfit: buyAndHoldProfit,
-                    // 年初の元本に対する損益率
-                    overnightProfitPercent: yearStartEquity != 0 ? overnightProfit / yearStartEquity * 100 : 0,
-                    // 年初終値に対する損益率（= 年初来の株価騰落率）
-                    buyAndHoldProfitPercent: e.firstClose != 0 ? Double(e.lastClose - e.firstClose) / Double(e.firstClose) * 100 : 0
-                )
+        // 年/月/週/日ごとの成績をまとめて集計
+        var periodPerformance: [WinRateBreakdown: [OvernightPeriodPerformance]] = [:]
+        for breakdown in WinRateBreakdown.allCases {
+            periodPerformance[breakdown] = buildPeriodPerformance(
+                bars: bars,
+                trades: trades,
+                equityCurve: equityCurve,
+                initialCapital: initialCapital,
+                shares: shares,
+                calendar: calendar,
+                breakdown: breakdown
             )
         }
 
@@ -359,13 +361,86 @@ extension OvernightWinRateResult {
             cumulativeReturn: (overnightEquity - initialCapital) / initialCapital * 100,
             buyAndHoldReturn: buyAndHoldReturn,
             equityCurve: equityCurve,
-            yearlyPerformance: yearlyPerformance,
+            periodPerformance: periodPerformance,
             weekdayPerformance: weekdayPerformance,
             isCompounding: useCompounding,
             lotSize: lotSize,
             startDate: bars.first?.date,
             endDate: bars.last?.date
         )
+    }
+
+    /// 指定した集計単位（年/月/週/日）で成績を集計する。
+    /// 年次集計と同じロジックを、日付→キーの変換だけ差し替えて汎用化したもの。
+    /// - トレード回数・勝ちは「決済日」の属する期間に計上
+    /// - 戦略損益は資産推移カーブの「期間末評価額」の差分（複利・単利どちらにも追従）
+    /// - 保有損益は各期間の「最初の終値→最後の終値」
+    private static func buildPeriodPerformance(
+        bars: [(date: Date, open: Float, close: Float)],
+        trades: [(buy: Float, sell: Float, buyDate: Date, sellDate: Date, sellClose: Float, daysHeld: Int)],
+        equityCurve: [OvernightEquityPoint],
+        initialCapital: Double,
+        shares: Double,
+        calendar: Calendar,
+        breakdown: WinRateBreakdown
+    ) -> [OvernightPeriodPerformance] {
+        // 期間バケットを作る（bars は日付昇順なので、初出順 = 時系列順）
+        var buckets: [String: (label: String, trades: Int, wins: Int, firstClose: Float, lastClose: Float)] = [:]
+        var order: [String] = []
+        for bar in bars {
+            let k = breakdown.key(for: bar.date, calendar: calendar)
+            if var e = buckets[k] {
+                e.lastClose = bar.close
+                buckets[k] = e
+            } else {
+                buckets[k] = (label: breakdown.label(for: bar.date, calendar: calendar), trades: 0, wins: 0, firstClose: bar.close, lastClose: bar.close)
+                order.append(k)
+            }
+        }
+        // トレード回数・勝ちは決済日の期間に計上
+        for t in trades {
+            let k = breakdown.key(for: t.sellDate, calendar: calendar)
+            guard var e = buckets[k] else { continue }
+            e.trades += 1
+            if t.sell > t.buy { e.wins += 1 }
+            buckets[k] = e
+        }
+        // 期間末の評価額（コスト前 / 税・金利控除後）
+        var endEquity: [String: Double] = [:]
+        var endNetEquity: [String: Double] = [:]
+        for point in equityCurve {
+            let k = breakdown.key(for: point.date, calendar: calendar)
+            endEquity[k] = point.overnight
+            endNetEquity[k] = point.overnightNet
+        }
+
+        var performance: [OvernightPeriodPerformance] = []
+        var previousEndEquity = initialCapital
+        var previousEndNetEquity = initialCapital
+        for k in order {
+            let e = buckets[k]!
+            let end = endEquity[k] ?? previousEndEquity
+            let overnightProfit = end - previousEndEquity
+            let startEquity = previousEndEquity          // 期首の評価額（= 元本）
+            let startNetEquity = previousEndNetEquity     // 期首の手取り評価額（表示用の元本）
+            previousEndEquity = end
+            previousEndNetEquity = endNetEquity[k] ?? previousEndNetEquity
+            let buyAndHoldProfit = Double(e.lastClose - e.firstClose) * shares
+            performance.append(
+                OvernightPeriodPerformance(
+                    id: k,
+                    label: e.label,
+                    trades: e.trades,
+                    winRate: e.trades > 0 ? Double(e.wins) / Double(e.trades) * 100 : 0,
+                    principal: startNetEquity,
+                    overnightProfit: overnightProfit,
+                    buyAndHoldProfit: buyAndHoldProfit,
+                    overnightProfitPercent: startEquity != 0 ? overnightProfit / startEquity * 100 : 0,
+                    buyAndHoldProfitPercent: e.firstClose != 0 ? Double(e.lastClose - e.firstClose) / Double(e.firstClose) * 100 : 0
+                )
+            )
+        }
+        return performance
     }
 }
 
@@ -601,6 +676,9 @@ struct OvernightWinRateResultCard: View {
     /// チェックを外した（平均損益率の集計から除外する）曜日の集合
     @State private var excludedWeekdays: Set<Int> = []
 
+    /// 成績一覧の集計単位（年/月/週/日）
+    @State private var breakdown: WinRateBreakdown = .year
+
     /// チェックが入っている曜日だけのトレードを合算した平均損益率（％）。
     /// トレード回数で重み付けするので「その曜日たちだけ売買した場合の実際の平均」になる。
     private var selectedWeekdayAverage: Double? {
@@ -666,9 +744,9 @@ struct OvernightWinRateResultCard: View {
                 equityChart
             }
 
-            if result.yearlyPerformance.count >= 2 {
+            if !(result.periodPerformance[.year] ?? []).isEmpty {
                 Divider()
-                yearlyList
+                periodList
             }
         }
         .padding()
@@ -844,22 +922,42 @@ struct OvernightWinRateResultCard: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
-    /// 年ごとのパフォーマンス一覧
+    /// 期間ごとのパフォーマンス一覧（年/月/週/日を切り替え可能）
     @ViewBuilder
-    private var yearlyList: some View {
+    private var periodList: some View {
+        // 件数が多い（日・週など）と描画が重いので直近ぶんだけ表示する
+        let cap = 200
+        let full = result.periodPerformance[breakdown] ?? []
+        let truncated = full.count > cap
+        let list = truncated ? Array(full.suffix(cap)) : full
+
         VStack(alignment: .leading, spacing: 8) {
-            Text(result.isCompounding ? "年ごとの成績（複利/\(result.lotSize)株単位 / 保有=100株）" : "年ごとの成績（100株）")
+            Text(result.isCompounding ? "期間ごとの成績（複利/\(result.lotSize)株単位 / 保有=100株）" : "期間ごとの成績（100株）")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
-            Label("★ = \(result.strategy.shortLabel)がずっと保有を上回った年", systemImage: "star.fill")
+            // 集計単位の切り替え（年/月/週/日）
+            Picker("集計単位", selection: $breakdown) {
+                ForEach(WinRateBreakdown.allCases) { b in
+                    Text(b.rawValue).tag(b)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Label("★ = \(result.strategy.shortLabel)がずっと保有を上回った\(breakdown.rawValue)", systemImage: "star.fill")
                 .labelStyle(.titleOnly)
                 .font(.system(size: 11))
                 .foregroundColor(.orange)
 
+            if truncated {
+                Text("※ 件数が多いため直近\(cap)件のみ表示")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+
             // ヘッダー
             HStack {
-                Text("年").frame(width: 64, alignment: .leading)
+                Text(breakdown.rawValue).frame(width: 68, alignment: .leading)
                 Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
                 Text("元本").frame(maxWidth: .infinity, alignment: .trailing)
                 Text(result.strategy.shortLabel).frame(maxWidth: .infinity, alignment: .trailing)
@@ -868,28 +966,30 @@ struct OvernightWinRateResultCard: View {
             .font(.system(size: 11))
             .foregroundColor(.secondary)
 
-            ForEach(result.yearlyPerformance) { y in
-                let overnightWins = y.overnightProfit > y.buyAndHoldProfit
+            ForEach(list) { p in
+                let overnightWins = p.overnightProfit > p.buyAndHoldProfit
                 HStack {
                     HStack(spacing: 3) {
                         Image(systemName: "star.fill")
                             .font(.system(size: 9))
                             .foregroundColor(.orange)
                             .opacity(overnightWins ? 1 : 0)
-                        Text(verbatim: "\(y.year)")
+                        Text(p.label)
                             .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
                     }
-                    .frame(width: 64, alignment: .leading)
-                    Text(y.trades > 0 ? String(format: "%.0f%%", y.winRate) : "—")
+                    .frame(width: 68, alignment: .leading)
+                    Text(p.trades > 0 ? String(format: "%.0f%%", p.winRate) : "—")
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .foregroundColor(.secondary)
-                    Text(Self.plainYenText(y.principal))
+                    Text(Self.plainYenText(p.principal))
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                    amountCell(yen: y.overnightProfit, percent: y.overnightProfitPercent, bold: overnightWins)
-                    amountCell(yen: y.buyAndHoldProfit, percent: y.buyAndHoldProfitPercent, bold: false)
+                    amountCell(yen: p.overnightProfit, percent: p.overnightProfitPercent, bold: overnightWins)
+                    amountCell(yen: p.buyAndHoldProfit, percent: p.buyAndHoldProfitPercent, bold: false)
                 }
                 .font(.system(size: 13, design: .monospaced))
                 .padding(.vertical, 3)
