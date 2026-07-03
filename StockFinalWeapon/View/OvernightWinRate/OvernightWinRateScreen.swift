@@ -95,6 +95,16 @@ struct OvernightWeekdayPerformance: Identifiable {
     let trades: Int              // その曜日のトレード回数
     let winRate: Double          // その曜日の勝率（％）
     let averageReturn: Double    // その曜日の1トレードあたり平均損益率（％）
+    let averageWin: Double       // 勝ちトレードの平均利益率（％）。勝ちが無ければ0
+    let averageLoss: Double      // 負けトレードの平均損失率（％・負値）。負けが無ければ0
+    let worstReturn: Double      // その曜日の最大の負け（1トレードの最悪損益率・％）。負けが無ければ0
+
+    /// ペイオフレシオ（平均利益率 ÷ 平均損失率の絶対値）。1を超えると勝ちの方が大きい。
+    /// 負けが無い場合は nil（比が定義できない）
+    var payoffRatio: Double? {
+        guard averageLoss < 0 else { return nil }
+        return averageWin / abs(averageLoss)
+    }
 
     /// 曜日の日本語1文字表記（月・火・…）
     var shortName: String {
@@ -153,8 +163,9 @@ extension OvernightWinRateResult {
         var wins = 0, losses = 0, draws = 0
         var returnSum = 0.0
 
-        // 曜日ごとの集計（エントリー日=買った日の曜日ごとに、トレード数・勝ち数・損益率合計を貯める）
-        var weekdayStats: [Int: (trades: Int, wins: Int, returnSum: Double)] = [:]
+        // 曜日ごとの集計（エントリー日=買った日の曜日ごとに集計）
+        // winReturnSum=勝ちトレードの損益率合計 / lossReturnSum=負けトレードの損益率合計(負値) / worst=最悪の1トレード
+        var weekdayStats: [Int: (trades: Int, wins: Int, returnSum: Double, lossCount: Int, winReturnSum: Double, lossReturnSum: Double, worst: Double)] = [:]
 
         // 初期投資額をそろえる（最初の終値で 100株 買った金額）
         let shares = 100.0
@@ -211,10 +222,17 @@ extension OvernightWinRateResult {
 
             // エントリー日の曜日ごとに集計
             let weekday = calendar.component(.weekday, from: t.buyDate)
-            var ws = weekdayStats[weekday] ?? (trades: 0, wins: 0, returnSum: 0.0)
+            var ws = weekdayStats[weekday] ?? (trades: 0, wins: 0, returnSum: 0.0, lossCount: 0, winReturnSum: 0.0, lossReturnSum: 0.0, worst: 0.0)
             ws.trades += 1
-            if sell > buy { ws.wins += 1 }
             ws.returnSum += ret
+            if sell > buy {
+                ws.wins += 1
+                ws.winReturnSum += ret
+            } else if sell < buy {
+                ws.lossCount += 1
+                ws.lossReturnSum += ret
+                ws.worst = min(ws.worst, ret)
+            }
             weekdayStats[weekday] = ws
 
             // 建玉株数（複利=資金で買える整数単位ぶん / 単利=100株固定）
@@ -322,7 +340,10 @@ extension OvernightWinRateResult {
                 weekday: wd,
                 trades: s.trades,
                 winRate: Double(s.wins) / Double(s.trades) * 100,
-                averageReturn: s.returnSum / Double(s.trades) * 100
+                averageReturn: s.returnSum / Double(s.trades) * 100,
+                averageWin: s.wins > 0 ? s.winReturnSum / Double(s.wins) * 100 : 0,
+                averageLoss: s.lossCount > 0 ? s.lossReturnSum / Double(s.lossCount) * 100 : 0,
+                worstReturn: s.worst * 100
             )
         }
 
@@ -577,6 +598,20 @@ struct OvernightWinRateScreen: View {
 struct OvernightWinRateResultCard: View {
     let result: OvernightWinRateResult
 
+    /// チェックを外した（平均損益率の集計から除外する）曜日の集合
+    @State private var excludedWeekdays: Set<Int> = []
+
+    /// チェックが入っている曜日だけのトレードを合算した平均損益率（％）。
+    /// トレード回数で重み付けするので「その曜日たちだけ売買した場合の実際の平均」になる。
+    private var selectedWeekdayAverage: Double? {
+        let selected = result.weekdayPerformance.filter { !excludedWeekdays.contains($0.weekday) }
+        let totalTrades = selected.reduce(0) { $0 + $1.trades }
+        guard totalTrades > 0 else { return nil }
+        // averageReturn(%) × trades = その曜日の損益率合計(%) なので、合計 ÷ 総回数で加重平均になる
+        let weightedSum = selected.reduce(0.0) { $0 + $1.averageReturn * Double($1.trades) }
+        return weightedSum / Double(totalTrades)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
@@ -700,12 +735,35 @@ struct OvernightWinRateResultCard: View {
     @ViewBuilder
     private var weekdayList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("曜日ごとの平均損益率（エントリー日の曜日）")
+            Text("曜日ごとの成績（エントリー日の曜日）")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
-            // ヘッダー
+            Text("ペイオフ = 平均利益 ÷ 平均損失。1未満だと負けの方が大きく、勝率が高くても平均はマイナスになりやすい。")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+
+            // チェックが入っている曜日だけを合算した平均損益率
             HStack {
+                Text("選択した曜日の平均損益率")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                if let avg = selectedWeekdayAverage {
+                    Text(String(format: "%+.3f%%", avg))
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .foregroundColor(avg >= 0 ? .red : .blue)
+                } else {
+                    Text("—")
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+
+            // 1行目のヘッダー（先頭にチェックボックスぶんの余白）
+            HStack {
+                Spacer().frame(width: 28)
                 Text("曜日").frame(width: 44, alignment: .leading)
                 Text("回数").frame(maxWidth: .infinity, alignment: .trailing)
                 Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
@@ -715,25 +773,75 @@ struct OvernightWinRateResultCard: View {
             .foregroundColor(.secondary)
 
             ForEach(result.weekdayPerformance) { w in
-                HStack {
-                    Text(w.shortName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 44, alignment: .leading)
-                    Text("\(w.trades)")
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .foregroundColor(.secondary)
-                    Text(String(format: "%.0f%%", w.winRate))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .foregroundColor(.secondary)
-                    Text(String(format: "%+.3f%%", w.averageReturn))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .foregroundColor(w.averageReturn >= 0 ? .red : .blue)
+                let isSelected = !excludedWeekdays.contains(w.weekday)
+                HStack(spacing: 0) {
+                    // チェックボックス（タップで集計対象のオン/オフを切り替え）
+                    Button {
+                        if isSelected {
+                            excludedWeekdays.insert(w.weekday)
+                        } else {
+                            excludedWeekdays.remove(w.weekday)
+                        }
+                    } label: {
+                        Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 18))
+                            .foregroundColor(isSelected ? .accentColor : .secondary)
+                            .frame(width: 28, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+
+                VStack(spacing: 2) {
+                    // 上段: 曜日 / 回数 / 勝率 / 平均損益率
+                    HStack {
+                        Text(w.shortName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 44, alignment: .leading)
+                        Text("\(w.trades)")
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%.0f%%", w.winRate))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%+.3f%%", w.averageReturn))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(w.averageReturn >= 0 ? .red : .blue)
+                    }
+                    .font(.system(size: 13, design: .monospaced))
+
+                    // 下段: 平均利益 / 平均損失 / ペイオフ / 最大の負け（色は付けず控えめに表示）
+                    HStack {
+                        Spacer().frame(width: 44)
+                        weekdaySubMetric(title: "平均利益", value: String(format: "%+.2f%%", w.averageWin))
+                        weekdaySubMetric(title: "平均損失", value: String(format: "%+.2f%%", w.averageLoss))
+                        weekdaySubMetric(title: "ペイオフ", value: w.payoffRatio.map { String(format: "%.2f", $0) } ?? "—")
+                        weekdaySubMetric(title: "最大の負け", value: String(format: "%.2f%%", w.worstReturn))
+                    }
                 }
-                .font(.system(size: 13, design: .monospaced))
-                .padding(.vertical, 3)
+                }
+                .opacity(isSelected ? 1 : 0.4)
+                .padding(.vertical, 4)
                 .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isSelected && w.averageReturn < 0 ? Color.blue.opacity(0.08) : Color.clear)
+                )
             }
         }
+    }
+
+    /// 曜日行の下段に並べる小さな指標セル（見出し＋値の縦2段。色は付けず控えめに表示）
+    private func weekdaySubMetric(title: String, value: String) -> some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(title)
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     /// 年ごとのパフォーマンス一覧
