@@ -88,6 +88,29 @@ struct OvernightYearlyPerformance: Identifiable {
     let buyAndHoldProfitPercent: Double // その年の保有損益率（年初終値に対する％）
 }
 
+/// 曜日ごとのパフォーマンス（エントリー日=買った日の曜日で集計）
+struct OvernightWeekdayPerformance: Identifiable {
+    var id: Int { weekday }
+    let weekday: Int             // Calendar.component(.weekday) の値（1=日 … 7=土）
+    let trades: Int              // その曜日のトレード回数
+    let winRate: Double          // その曜日の勝率（％）
+    let averageReturn: Double    // その曜日の1トレードあたり平均損益率（％）
+
+    /// 曜日の日本語1文字表記（月・火・…）
+    var shortName: String {
+        switch weekday {
+        case 1: return "日"
+        case 2: return "月"
+        case 3: return "火"
+        case 4: return "水"
+        case 5: return "木"
+        case 6: return "金"
+        case 7: return "土"
+        default: return "?"
+        }
+    }
+}
+
 /// 集計結果
 struct OvernightWinRateResult {
     let code: String
@@ -102,6 +125,7 @@ struct OvernightWinRateResult {
     let buyAndHoldReturn: Double // 期間中ずっと保有した場合の上昇率（％）
     let equityCurve: [OvernightEquityPoint] // 資産推移（2戦略の比較用）
     let yearlyPerformance: [OvernightYearlyPerformance] // 年ごとの成績（複数年のときのみ要素を持つ）
+    let weekdayPerformance: [OvernightWeekdayPerformance] // 曜日ごとの成績（エントリー日の曜日で集計）
     let isCompounding: Bool // オーバーナイト戦略を複利で計算したか（false=単利・100株固定）
     let lotSize: Int        // 複利時の売買単位（1株単位 or 100株単位）
     let startDate: Date?
@@ -129,6 +153,9 @@ extension OvernightWinRateResult {
         var wins = 0, losses = 0, draws = 0
         var returnSum = 0.0
 
+        // 曜日ごとの集計（エントリー日=買った日の曜日ごとに、トレード数・勝ち数・損益率合計を貯める）
+        var weekdayStats: [Int: (trades: Int, wins: Int, returnSum: Double)] = [:]
+
         // 初期投資額をそろえる（最初の終値で 100株 買った金額）
         let shares = 100.0
         let firstClose = bars.first!.close
@@ -148,16 +175,16 @@ extension OvernightWinRateResult {
         // 戦略ごとに1トレード（買値・売値・決済日・決済日の終値・保有日数）の列を作る。
         // - .overnight: 当日終値で買い、翌日始値で売る（決済日=翌日、翌日まで持ち越すので金利あり）
         // - .intraday : 当日始値で買い、当日終値で売る（決済日=当日、日計りなので保有日数=0=金利なし）
-        let trades: [(buy: Float, sell: Float, sellDate: Date, sellClose: Float, daysHeld: Int)]
+        let trades: [(buy: Float, sell: Float, buyDate: Date, sellDate: Date, sellClose: Float, daysHeld: Int)]
         switch strategy {
         case .overnight:
             trades = (0..<(bars.count - 1)).map { i in
                 let daysHeld = max(1, calendar.dateComponents([.day], from: bars[i].date, to: bars[i + 1].date).day ?? 1)
-                return (bars[i].close, bars[i + 1].open, bars[i + 1].date, bars[i + 1].close, daysHeld)
+                return (bars[i].close, bars[i + 1].open, bars[i].date, bars[i + 1].date, bars[i + 1].close, daysHeld)
             }
         case .intraday:
             trades = (0..<bars.count).map { i in
-                (bars[i].open, bars[i].close, bars[i].date, bars[i].close, 0)
+                (bars[i].open, bars[i].close, bars[i].date, bars[i].date, bars[i].close, 0)
             }
         }
 
@@ -181,6 +208,14 @@ extension OvernightWinRateResult {
             } else {
                 draws += 1
             }
+
+            // エントリー日の曜日ごとに集計
+            let weekday = calendar.component(.weekday, from: t.buyDate)
+            var ws = weekdayStats[weekday] ?? (trades: 0, wins: 0, returnSum: 0.0)
+            ws.trades += 1
+            if sell > buy { ws.wins += 1 }
+            ws.returnSum += ret
+            weekdayStats[weekday] = ws
 
             // 建玉株数（複利=資金で買える整数単位ぶん / 単利=100株固定）
             // 信用取引なので、初期資金が1単位に満たなくても最低1単位は建てる（不足分は信用＝マージン）。
@@ -279,6 +314,18 @@ extension OvernightWinRateResult {
             )
         }
 
+        // 曜日ごとの成績を月〜日の順（月=2 … 土=7, 日=1）で並べる
+        let weekdayOrder = [2, 3, 4, 5, 6, 7, 1]
+        let weekdayPerformance: [OvernightWeekdayPerformance] = weekdayOrder.compactMap { wd in
+            guard let s = weekdayStats[wd], s.trades > 0 else { return nil }
+            return OvernightWeekdayPerformance(
+                weekday: wd,
+                trades: s.trades,
+                winRate: Double(s.wins) / Double(s.trades) * 100,
+                averageReturn: s.returnSum / Double(s.trades) * 100
+            )
+        }
+
         return OvernightWinRateResult(
             code: code,
             strategy: strategy,
@@ -292,6 +339,7 @@ extension OvernightWinRateResult {
             buyAndHoldReturn: buyAndHoldReturn,
             equityCurve: equityCurve,
             yearlyPerformance: yearlyPerformance,
+            weekdayPerformance: weekdayPerformance,
             isCompounding: useCompounding,
             lotSize: lotSize,
             startDate: bars.first?.date,
@@ -573,6 +621,11 @@ struct OvernightWinRateResultCard: View {
                 color: result.buyAndHoldReturn >= 0 ? .red : .blue
             )
 
+            if !result.weekdayPerformance.isEmpty {
+                Divider()
+                weekdayList
+            }
+
             if result.equityCurve.count >= 2 {
                 Divider()
                 equityChart
@@ -640,6 +693,46 @@ struct OvernightWinRateResultCard: View {
             }
             .chartLegend(position: .bottom, spacing: 8)
             .frame(height: 220)
+        }
+    }
+
+    /// 曜日ごとの平均損益率一覧（エントリー日=買った日の曜日で集計）
+    @ViewBuilder
+    private var weekdayList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("曜日ごとの平均損益率（エントリー日の曜日）")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            // ヘッダー
+            HStack {
+                Text("曜日").frame(width: 44, alignment: .leading)
+                Text("回数").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("平均損益率").frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+
+            ForEach(result.weekdayPerformance) { w in
+                HStack {
+                    Text(w.shortName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 44, alignment: .leading)
+                    Text("\(w.trades)")
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.0f%%", w.winRate))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%+.3f%%", w.averageReturn))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .foregroundColor(w.averageReturn >= 0 ? .red : .blue)
+                }
+                .font(.system(size: 13, design: .monospaced))
+                .padding(.vertical, 3)
+                .padding(.horizontal, 4)
+            }
         }
     }
 
