@@ -404,6 +404,57 @@ extension OvernightWinRateResult {
         return equityCurve
     }
 
+    /// 曜日チェックに連動する上部サマリー（回数・勝敗・勝率・平均損益率・累積リターン）
+    struct FilteredSummary {
+        let totalTrades: Int
+        let wins: Int
+        let losses: Int
+        let draws: Int
+        let winRate: Double
+        let averageReturn: Double
+        let cumulativeReturn: Double
+    }
+
+    /// 指定した曜日（買った日の曜日）を除外したサマリーを返す。
+    /// 除外なしなら事前計算済みの値をそのまま返す。
+    func summary(excludingWeekdays excluded: Set<Int>) -> FilteredSummary {
+        if excluded.isEmpty {
+            return FilteredSummary(
+                totalTrades: totalTrades, wins: wins, losses: losses, draws: draws,
+                winRate: winRate, averageReturn: averageReturn, cumulativeReturn: cumulativeReturn
+            )
+        }
+        let calendar = Calendar.current
+        let filtered = trades.filter { !excluded.contains(calendar.component(.weekday, from: $0.buyDate)) }
+        guard !filtered.isEmpty else {
+            return FilteredSummary(totalTrades: 0, wins: 0, losses: 0, draws: 0, winRate: 0, averageReturn: 0, cumulativeReturn: 0)
+        }
+        var w = 0, l = 0, d = 0
+        var returnSum = 0.0
+        for t in filtered {
+            let ret = Double(t.sell - t.buy) / Double(t.buy)
+            returnSum += ret
+            if t.sell > t.buy { w += 1 } else if t.sell < t.buy { l += 1 } else { d += 1 }
+        }
+        let equity = Self.simulateEquityCurve(
+            trades: filtered,
+            startDate: bars.first?.date ?? Date(),
+            initialCapital: initialCapital,
+            shares: shares,
+            compounding: isCompounding,
+            lotSize: lotSize
+        )
+        let finalEquity = equity.last?.overnight ?? initialCapital
+        let n = filtered.count
+        return FilteredSummary(
+            totalTrades: n,
+            wins: w, losses: l, draws: d,
+            winRate: Double(w) / Double(n) * 100,
+            averageReturn: returnSum / Double(n) * 100,
+            cumulativeReturn: initialCapital != 0 ? (finalEquity - initialCapital) / initialCapital * 100 : 0
+        )
+    }
+
     /// 指定した曜日（買った日の曜日）を除外して、期間別成績を再計算する。
     /// 除外すると建玉サイズ（複利）や金利の推移が変わるので、資産推移から作り直す。
     func periodPerformanceList(breakdown: WinRateBreakdown, excludingWeekdays excluded: Set<Int>) -> [OvernightPeriodPerformance] {
@@ -763,6 +814,11 @@ struct OvernightWinRateResultCard: View {
             .joined(separator: "・")
     }
 
+    /// 曜日チェックに連動した上部サマリー
+    private var summary: OvernightWinRateResult.FilteredSummary {
+        result.summary(excludingWeekdays: excludedWeekdays)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
@@ -778,28 +834,35 @@ struct OvernightWinRateResultCard: View {
 
             // 勝率（メイン表示）
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(String(format: "%.1f", result.winRate))
+                Text(String(format: "%.1f", summary.winRate))
                     .font(.system(size: 44, weight: .bold, design: .rounded))
-                    .foregroundColor(result.winRate >= 50 ? .red : .blue)
+                    .foregroundColor(summary.winRate >= 50 ? .red : .blue)
                 Text("%")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(result.winRate >= 50 ? .red : .blue)
+                    .foregroundColor(summary.winRate >= 50 ? .red : .blue)
                 Spacer()
+            }
+
+            // 曜日チェックを外している場合は、その曜日を除外した集計であることを明示
+            if !excludedWeekdays.isEmpty {
+                Text("※ \(excludedWeekdayNames) を除外した集計")
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
             }
 
             Divider()
 
-            statRow(label: "トレード回数", value: "\(result.totalTrades) 回")
-            statRow(label: "勝ち / 負け / 引分", value: "\(result.wins) / \(result.losses) / \(result.draws)")
+            statRow(label: "トレード回数", value: "\(summary.totalTrades) 回")
+            statRow(label: "勝ち / 負け / 引分", value: "\(summary.wins) / \(summary.losses) / \(summary.draws)")
             statRow(
                 label: "1回あたり平均損益率",
-                value: String(format: "%+.3f%%", result.averageReturn),
-                color: result.averageReturn >= 0 ? .red : .blue
+                value: String(format: "%+.3f%%", summary.averageReturn),
+                color: summary.averageReturn >= 0 ? .red : .blue
             )
             statRow(
                 label: result.isCompounding ? "累積リターン（複利/\(result.lotSize)株単位）" : "累積リターン（単利・100株固定）",
-                value: String(format: "%+.2f%%", result.cumulativeReturn),
-                color: result.cumulativeReturn >= 0 ? .red : .blue
+                value: String(format: "%+.2f%%", summary.cumulativeReturn),
+                color: summary.cumulativeReturn >= 0 ? .red : .blue
             )
             statRow(
                 label: "ずっと保有した場合の上昇率",
