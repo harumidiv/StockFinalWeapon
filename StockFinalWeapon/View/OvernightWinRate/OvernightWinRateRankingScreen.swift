@@ -112,7 +112,7 @@ final class OvernightWinRateRankingViewModel: ObservableObject {
                             .fetchStockChartData(code: entry.code, startDate: start, endDate: end)
                         switch apiResult {
                         case .success(let candles):
-                            guard let result = OvernightWinRateResult.make(code: entry.code, candles: candles, compounding: false, lotSize: 100) else {
+                            guard let result = OvernightWinRateResult.make(code: entry.code, candles: candles, strategy: .overnight, compounding: false, lotSize: 100) else {
                                 return nil
                             }
                             return RankedWinRateRow(
