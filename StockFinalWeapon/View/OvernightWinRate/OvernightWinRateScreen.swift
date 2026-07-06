@@ -83,6 +83,8 @@ enum WinRateStrategy: String, CaseIterable, Identifiable {
     case overnight
     /// 当日始値で買い、当日終値で売る（デイトレード・日計り）
     case intraday
+    /// 前場引け（11:30頃）で買い、後場寄り（12:30）で売る（昼休みをまたぐ日計り）
+    case lunchBreak
 
     var id: Self { self }
 
@@ -91,6 +93,7 @@ enum WinRateStrategy: String, CaseIterable, Identifiable {
         switch self {
         case .overnight: return "引in→寄out 勝率"
         case .intraday: return "寄in→引out 勝率"
+        case .lunchBreak: return "前引→後場寄 勝率"
         }
     }
 
@@ -99,6 +102,7 @@ enum WinRateStrategy: String, CaseIterable, Identifiable {
         switch self {
         case .overnight: return "当日の終値で買い、翌日の始値で売った場合（オーバーナイト保有）の勝率を集計します。"
         case .intraday: return "当日の始値で買い、当日の終値で売った場合（デイトレード）の勝率を集計します。"
+        case .lunchBreak: return "前場の引け（11:30頃）で買い、後場の寄り（12:30）で売った場合の勝率を集計します。日中足を使うため、Yahoo Finance側の制限で直近約60日ぶんのみが対象です。"
         }
     }
 
@@ -107,8 +111,21 @@ enum WinRateStrategy: String, CaseIterable, Identifiable {
         switch self {
         case .overnight: return "オーバーナイト"
         case .intraday: return "デイトレ"
+        case .lunchBreak: return "前引→後場寄"
         }
     }
+
+    /// 戦略切り替えセグメント用の短いラベル
+    var pickerLabel: String {
+        switch self {
+        case .overnight: return "引→翌寄"
+        case .intraday: return "寄→引"
+        case .lunchBreak: return "前引→後場寄"
+        }
+    }
+
+    /// 日中足（30分足）が必要な戦略か。true の場合は取得期間が直近約60日に制限される。
+    var requiresIntradayData: Bool { self == .lunchBreak }
 }
 
 /// 資産推移チャートの1点（初期投資額をそろえて各戦略を比較する）
@@ -246,7 +263,9 @@ extension OvernightWinRateResult {
                 let daysHeld = max(1, calendar.dateComponents([.day], from: bars[i].date, to: bars[i + 1].date).day ?? 1)
                 return (bars[i].close, bars[i + 1].open, bars[i].date, bars[i + 1].date, bars[i + 1].close, daysHeld)
             }
-        case .intraday:
+        case .intraday, .lunchBreak:
+            // どちらも当日内で完結する日計り（保有日数=0=金利なし）。
+            // .lunchBreak は合成日足の open=前場引け・close=後場寄り をそのまま買値・売値に使う。
             trades = (0..<bars.count).map { i in
                 (bars[i].open, bars[i].close, bars[i].date, bars[i].date, bars[i].close, 0)
             }
@@ -586,8 +605,11 @@ final class OvernightWinRateViewModel: ObservableObject {
     /// 指定元本（円）。nil のときは「最初の終値で100株」を元本とする
     @Published var principal: Double?
 
-    /// 検証する売買戦略（引→翌寄 / 寄→引）
-    let strategy: WinRateStrategy
+    /// 検証する売買戦略（引→翌寄 / 寄→引 / 前引→後場寄）
+    @Published var strategy: WinRateStrategy
+
+    /// 日中足戦略で遡れる最大日数（Yahoo Finance の30分足は直近約60日まで）
+    static let intradayLookbackLimitDays = 59
 
     // 取得済みのデータ。複利/単利の切り替え時に再取得せず手元で再計算するために保持する。
     private var lastCandles: [MyStockChartData] = []
@@ -595,6 +617,14 @@ final class OvernightWinRateViewModel: ObservableObject {
 
     init(strategy: WinRateStrategy = .overnight) {
         self.strategy = strategy
+    }
+
+    /// 戦略切り替えなどでデータ源が変わる際に、取得済みデータと結果をクリアする。
+    func reset() {
+        result = nil
+        errorMessage = nil
+        lastCandles = []
+        lastCode = ""
     }
 
     /// 今日から period.days 分遡って集計する
@@ -615,18 +645,31 @@ final class OvernightWinRateViewModel: ObservableObject {
             return
         }
 
+        // 日中足（前引→後場寄）は直近約60日しか遡れないため、開始日をその範囲に丸める
+        var effectiveStart = start
+        if strategy.requiresIntradayData,
+           let minStart = Calendar.current.date(byAdding: .day, value: -Self.intradayLookbackLimitDays, to: end),
+           effectiveStart < minStart {
+            effectiveStart = minStart
+        }
+
         isLoading = true
         errorMessage = nil
         result = nil
 
-        let apiResult = await YahooYFinanceAPIService().fetchStockChartData(code: trimmed, startDate: start, endDate: end)
+        let service = YahooYFinanceAPIService()
+        let apiResult = strategy.requiresIntradayData
+            ? await service.fetchLunchBreakBars(code: trimmed, startDate: effectiveStart, endDate: end)
+            : await service.fetchStockChartData(code: trimmed, startDate: effectiveStart, endDate: end)
 
         switch apiResult {
         case .success(let candles):
             lastCandles = candles
             lastCode = trimmed
             guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal) else {
-                errorMessage = "データが不足しています。銘柄コードと期間をご確認ください。"
+                errorMessage = strategy.requiresIntradayData
+                    ? "データが不足しています。日中足は直近約60日ぶんのみ取得できます。銘柄コードと期間をご確認ください。"
+                    : "データが不足しています。銘柄コードと期間をご確認ください。"
                 isLoading = false
                 return
             }
@@ -654,7 +697,8 @@ enum WinRateRangeMode: String, CaseIterable, Identifiable {
 }
 
 struct OvernightWinRateScreen: View {
-    let strategy: WinRateStrategy
+    /// このタブで選べる戦略。2つ以上あるとフォーム上部に切り替えセグメントを表示する。
+    let selectableStrategies: [WinRateStrategy]
     @StateObject private var viewModel: OvernightWinRateViewModel
     @State private var code: String = ""
     @State private var principalText: String = ""
@@ -664,8 +708,8 @@ struct OvernightWinRateScreen: View {
     @State private var endDate: Date = Date()
     @FocusState private var isFocused: Bool
 
-    init(strategy: WinRateStrategy = .overnight) {
-        self.strategy = strategy
+    init(strategy: WinRateStrategy = .overnight, selectableStrategies: [WinRateStrategy]? = nil) {
+        self.selectableStrategies = selectableStrategies ?? [strategy]
         _viewModel = StateObject(wrappedValue: OvernightWinRateViewModel(strategy: strategy))
     }
 
@@ -706,7 +750,27 @@ struct OvernightWinRateScreen: View {
         NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(strategy.formDescription)
+                    // 戦略の切り替え（このタブに複数戦略があるときだけ表示）
+                    if selectableStrategies.count > 1 {
+                        Picker("戦略", selection: $viewModel.strategy) {
+                            ForEach(selectableStrategies) { s in
+                                Text(s.pickerLabel).tag(s)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: viewModel.strategy) { _, newValue in
+                            // データ源が変わるので取得済みデータを破棄し、日中足戦略では期間を60日以内に丸める
+                            viewModel.reset()
+                            if newValue.requiresIntradayData, period.days > OvernightWinRateViewModel.intradayLookbackLimitDays {
+                                period = .oneMonth
+                            }
+                            if !code.trimmingCharacters(in: .whitespaces).isEmpty {
+                                Task { await runCalculation() }
+                            }
+                        }
+                    }
+
+                    Text(viewModel.strategy.formDescription)
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
 
@@ -810,10 +874,10 @@ struct OvernightWinRateScreen: View {
                 }
                 .padding()
             }
-            .navigationTitle(strategy.navigationTitle)
+            .navigationTitle(viewModel.strategy.navigationTitle)
             .toolbar {
                 // ランキング一覧はオーバーナイト戦略専用。デイトレでは表示しない。
-                if strategy == .overnight {
+                if viewModel.strategy == .overnight {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         NavigationLink {
                             let range = resolvedRange
@@ -822,6 +886,11 @@ struct OvernightWinRateScreen: View {
                             Image(systemName: "list.number")
                         }
                     }
+                }
+                // 数字キーボード（銘柄コード・元本）には確定キーが無いので、閉じるボタンを用意する
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("閉じる") { isFocused = false }
                 }
             }
         }

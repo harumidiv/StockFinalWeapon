@@ -5,9 +5,9 @@ import SwiftYFinance
 
 final class SwiftYFinanceHelper {
     /// Fetch chart data via SwiftYFinance in async/await style
-    static func fetchChartData(identifier: String, start: Date, end: Date) async throws -> [StockChartData] {
+    static func fetchChartData(identifier: String, start: Date, end: Date, interval: ChartTimeInterval = .oneday) async throws -> [StockChartData] {
         return try await withCheckedThrowingContinuation { continuation in
-            SwiftYFinance.chartDataBy(identifier: identifier, start: start, end: end) { data, error in
+            SwiftYFinance.chartDataBy(identifier: identifier, start: start, end: end, interval: interval) { data, error in
                 if let error = error {
                     continuation.resume(throwing: error)
                     return
