@@ -202,7 +202,10 @@ extension OvernightWinRateResult {
     ///   - strategy: .overnight=当日終値で買い翌日始値で売る / .intraday=当日始値で買い当日終値で売る
     ///   - compounding: true=複利（損益を再投資して建玉を増やす）, false=単利（100株固定）
     ///   - lotSize: 複利時の売買単位（1=1株単位, 100=100株単位）。余りは現金として持ち越す。
-    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int) -> OvernightWinRateResult? {
+    ///   - principal: 指定元本（円）。nil または 0以下 のときは従来どおり「最初の終値で100株」を元本とする。
+    ///                指定時は開始時にその金額で買える整数単元（100株単位・最低1単元）を建玉の基準とし、
+    ///                単利の固定株数・複利の初期資金・ずっと保有の株数すべてに反映する。
+    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int, principal: Double? = nil) -> OvernightWinRateResult? {
         // 有効な始値・終値のみを日付昇順に整理
         let bars = candles
             .compactMap { c -> (date: Date, open: Float, close: Float)? in
@@ -213,10 +216,21 @@ extension OvernightWinRateResult {
 
         guard bars.count >= 2 else { return nil }
 
-        // 初期投資額をそろえる（最初の終値で 100株 買った金額）
-        let shares = 100.0
+        // 初期投資額（元本）を決める。
+        // - 元本未指定: 従来どおり「最初の終値で100株」を元本とする
+        // - 元本指定: その金額で買える整数単元（100株単位・最低1単元）を建玉の基準とし、元本=指定額
         let firstClose = bars.first!.close
-        let initialCapital = Double(firstClose) * shares
+        let shares: Double
+        let initialCapital: Double
+        if let principal, principal > 0 {
+            let unitPrice = Double(firstClose) * 100 // 1単元（100株）の金額
+            let units = unitPrice > 0 ? max(1.0, (principal / unitPrice).rounded(.down)) : 1.0
+            shares = units * 100
+            initialCapital = principal
+        } else {
+            shares = 100.0
+            initialCapital = Double(firstClose) * shares
+        }
 
         // 複利（全額再投資）か単利（100株固定でキャッシュに積み上げ）か
         let useCompounding = compounding
@@ -569,6 +583,8 @@ final class OvernightWinRateViewModel: ObservableObject {
     @Published var isCompounding = false
     /// 複利時の売買単位（1=1株単位, 100=100株単位）
     @Published var lotSize = 100
+    /// 指定元本（円）。nil のときは「最初の終値で100株」を元本とする
+    @Published var principal: Double?
 
     /// 検証する売買戦略（引→翌寄 / 寄→引）
     let strategy: WinRateStrategy
@@ -609,7 +625,7 @@ final class OvernightWinRateViewModel: ObservableObject {
         case .success(let candles):
             lastCandles = candles
             lastCode = trimmed
-            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, strategy: strategy, compounding: isCompounding, lotSize: lotSize) else {
+            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal) else {
                 errorMessage = "データが不足しています。銘柄コードと期間をご確認ください。"
                 isLoading = false
                 return
@@ -626,7 +642,7 @@ final class OvernightWinRateViewModel: ObservableObject {
     /// 複利/単利・売買単位の切り替え時に、取得済みデータから再計算する（通信なし）
     func recompute() {
         guard !lastCandles.isEmpty else { return }
-        result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, strategy: strategy, compounding: isCompounding, lotSize: lotSize)
+        result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal)
     }
 }
 
@@ -641,6 +657,7 @@ struct OvernightWinRateScreen: View {
     let strategy: WinRateStrategy
     @StateObject private var viewModel: OvernightWinRateViewModel
     @State private var code: String = ""
+    @State private var principalText: String = ""
     @State private var period: WinRatePeriod = .oneYear
     @State private var rangeMode: WinRateRangeMode = .preset
     @State private var startDate: Date = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
@@ -652,8 +669,19 @@ struct OvernightWinRateScreen: View {
         _viewModel = StateObject(wrappedValue: OvernightWinRateViewModel(strategy: strategy))
     }
 
+    /// 入力された元本テキストを円に変換する（カンマ・空白は無視。未入力/0以下は nil=100株基準）
+    private var parsedPrincipal: Double? {
+        let cleaned = principalText
+            .replacingOccurrences(of: ",", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard let value = Double(cleaned), value > 0 else { return nil }
+        return value
+    }
+
     /// 現在のモードに応じて計算を実行
     private func runCalculation() async {
+        viewModel.principal = parsedPrincipal
         switch rangeMode {
         case .preset:
             await viewModel.calculate(code: code, period: period)
@@ -688,6 +716,21 @@ struct OvernightWinRateScreen: View {
                             .focused($isFocused)
                             .keyboardType(.numbersAndPunctuation)
                             .textFieldStyle(.roundedBorder)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            TextField("元本 (円・未入力なら100株)", text: $principalText)
+                                .focused($isFocused)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                                .onChange(of: principalText) { _, _ in
+                                    // 取得済みデータから即再計算（通信なし）。未計算なら no-op。
+                                    viewModel.principal = parsedPrincipal
+                                    viewModel.recompute()
+                                }
+                            Text("指定した元本で買える整数単元（100株単位・最低1単元）で検証します。")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
 
                         Picker("指定方法", selection: $rangeMode) {
                             ForEach(WinRateRangeMode.allCases) { m in
@@ -892,17 +935,20 @@ struct OvernightWinRateResultCard: View {
         )
     }
 
+    /// 建玉株数（単利・ずっと保有で使う固定株数）を整数表記した文字列
+    private var sharesText: String { "\(Int(result.shares))" }
+
     private var overnightLabel: String {
-        result.isCompounding ? "\(result.strategy.shortLabel)（複利/\(result.lotSize)株単位）" : "\(result.strategy.shortLabel)（単利・100株）"
+        result.isCompounding ? "\(result.strategy.shortLabel)（複利/\(result.lotSize)株単位）" : "\(result.strategy.shortLabel)（単利・\(sharesText)株）"
     }
     private static let overnightNetLabel = "税・金利控除後（手取り）"
-    private static let buyAndHoldLabel = "ずっと保有（100株）"
+    private var buyAndHoldLabel: String { "ずっと保有（\(sharesText)株）" }
 
     /// 初期投資額をそろえた各戦略の資産推移チャート
     @ViewBuilder
     private var equityChart: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("資産推移（初期投資 = 最初の終値で100株購入）")
+            Text("資産推移（初期投資 = \(OvernightWinRateResultCard.plainYenText(result.initialCapital)) / \(sharesText)株）")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
@@ -923,12 +969,12 @@ struct OvernightWinRateResultCard: View {
                     x: .value("日付", point.date),
                     y: .value("評価額", point.buyAndHold)
                 )
-                .foregroundStyle(by: .value("系列", Self.buyAndHoldLabel))
+                .foregroundStyle(by: .value("系列", buyAndHoldLabel))
             }
             .chartForegroundStyleScale([
                 overnightLabel: Color.orange,
                 Self.overnightNetLabel: Color.red,
-                Self.buyAndHoldLabel: Color.blue
+                buyAndHoldLabel: Color.blue
             ])
             .chartYAxis {
                 AxisMarks { value in
@@ -1068,7 +1114,7 @@ struct OvernightWinRateResultCard: View {
         let list = truncated ? Array(full.suffix(cap)) : full
 
         VStack(alignment: .leading, spacing: 8) {
-            Text(result.isCompounding ? "期間ごとの成績（複利/\(result.lotSize)株単位 / 保有=100株）" : "期間ごとの成績（100株）")
+            Text(result.isCompounding ? "期間ごとの成績（複利/\(result.lotSize)株単位 / 保有=\(sharesText)株）" : "期間ごとの成績（\(sharesText)株）")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
