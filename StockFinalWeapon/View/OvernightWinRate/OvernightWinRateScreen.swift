@@ -185,6 +185,27 @@ struct OvernightWeekdayPerformance: Identifiable {
     }
 }
 
+/// 月（1〜12月）ごとのパフォーマンス（エントリー日=買った日の月で全期間を通して集計＝季節性）
+struct OvernightMonthlyPerformance: Identifiable {
+    var id: Int { month }
+    let month: Int               // 1...12
+    let trades: Int              // その月のトレード回数
+    let winRate: Double          // その月の勝率（％）
+    let averageReturn: Double    // その月の1トレードあたり平均損益率（％）
+    let averageWin: Double       // 勝ちトレードの平均利益率（％）。勝ちが無ければ0
+    let averageLoss: Double      // 負けトレードの平均損失率（％・負値）。負けが無ければ0
+    let worstReturn: Double      // その月の最大の負け（1トレードの最悪損益率・％）。負けが無ければ0
+
+    /// ペイオフレシオ（平均利益率 ÷ 平均損失率の絶対値）。負けが無い場合は nil。
+    var payoffRatio: Double? {
+        guard averageLoss < 0 else { return nil }
+        return averageWin / abs(averageLoss)
+    }
+
+    /// 「1月」などの表記
+    var shortName: String { "\(month)月" }
+}
+
 /// 集計結果
 struct OvernightWinRateResult {
     let code: String
@@ -200,6 +221,7 @@ struct OvernightWinRateResult {
     let equityCurve: [OvernightEquityPoint] // 資産推移（2戦略の比較用）
     let periodPerformance: [WinRateBreakdown: [OvernightPeriodPerformance]] // 年/月/週/日ごとの成績
     let weekdayPerformance: [OvernightWeekdayPerformance] // 曜日ごとの成績（エントリー日の曜日で集計）
+    let monthlyPerformance: [OvernightMonthlyPerformance] // 月（1〜12月）ごとの成績（エントリー日の月で集計＝季節性）
     let isCompounding: Bool // オーバーナイト戦略を複利で計算したか（false=単利・100株固定）
     let lotSize: Int        // 複利時の売買単位（1株単位 or 100株単位）
     let startDate: Date?
@@ -288,6 +310,9 @@ extension OvernightWinRateResult {
         var returnSum = 0.0
         // winReturnSum=勝ちトレードの損益率合計 / lossReturnSum=負けトレードの損益率合計(負値) / worst=最悪の1トレード
         var weekdayStats: [Int: (trades: Int, wins: Int, returnSum: Double, lossCount: Int, winReturnSum: Double, lossReturnSum: Double, worst: Double)] = [:]
+        // 月（1〜12）別集計（買った日の月で全期間を通して集計＝季節性）。曜日と同じ内訳を持つ。
+        typealias Bucket = (trades: Int, wins: Int, returnSum: Double, lossCount: Int, winReturnSum: Double, lossReturnSum: Double, worst: Double)
+        var monthStats: [Int: Bucket] = [:]
         for t in trades {
             let buy = t.buy
             let sell = t.sell
@@ -315,6 +340,20 @@ extension OvernightWinRateResult {
                 ws.worst = min(ws.worst, ret)
             }
             weekdayStats[weekday] = ws
+
+            let month = calendar.component(.month, from: t.buyDate)
+            var ms = monthStats[month] ?? (trades: 0, wins: 0, returnSum: 0.0, lossCount: 0, winReturnSum: 0.0, lossReturnSum: 0.0, worst: 0.0)
+            ms.trades += 1
+            ms.returnSum += ret
+            if sell > buy {
+                ms.wins += 1
+                ms.winReturnSum += ret
+            } else if sell < buy {
+                ms.lossCount += 1
+                ms.lossReturnSum += ret
+                ms.worst = min(ms.worst, ret)
+            }
+            monthStats[month] = ms
         }
 
         let total = trades.count
@@ -353,6 +392,20 @@ extension OvernightWinRateResult {
             )
         }
 
+        // 月ごとの成績を1月→12月の順で並べる（トレードのあった月のみ）
+        let monthlyPerformance: [OvernightMonthlyPerformance] = (1...12).compactMap { m in
+            guard let s = monthStats[m], s.trades > 0 else { return nil }
+            return OvernightMonthlyPerformance(
+                month: m,
+                trades: s.trades,
+                winRate: Double(s.wins) / Double(s.trades) * 100,
+                averageReturn: s.returnSum / Double(s.trades) * 100,
+                averageWin: s.wins > 0 ? s.winReturnSum / Double(s.wins) * 100 : 0,
+                averageLoss: s.lossCount > 0 ? s.lossReturnSum / Double(s.lossCount) * 100 : 0,
+                worstReturn: s.worst * 100
+            )
+        }
+
         return OvernightWinRateResult(
             code: code,
             strategy: strategy,
@@ -367,6 +420,7 @@ extension OvernightWinRateResult {
             equityCurve: equityCurve,
             periodPerformance: periodPerformance,
             weekdayPerformance: weekdayPerformance,
+            monthlyPerformance: monthlyPerformance,
             isCompounding: useCompounding,
             lotSize: lotSize,
             startDate: bars.first?.date,
@@ -448,17 +502,26 @@ extension OvernightWinRateResult {
         let cumulativeReturn: Double
     }
 
-    /// 指定した曜日（買った日の曜日）を除外したサマリーを返す。
+    /// 買った日が、除外対象の曜日または月に該当するトレードを取り除く。
+    private func filteredTrades(excludingWeekdays exWeekdays: Set<Int>, excludingMonths exMonths: Set<Int>)
+    -> [(buy: Float, sell: Float, buyDate: Date, sellDate: Date, sellClose: Float, daysHeld: Int)] {
+        let calendar = Calendar.current
+        return trades.filter {
+            !exWeekdays.contains(calendar.component(.weekday, from: $0.buyDate))
+            && !exMonths.contains(calendar.component(.month, from: $0.buyDate))
+        }
+    }
+
+    /// 指定した曜日・月（買った日基準）を除外したサマリーを返す。
     /// 除外なしなら事前計算済みの値をそのまま返す。
-    func summary(excludingWeekdays excluded: Set<Int>) -> FilteredSummary {
-        if excluded.isEmpty {
+    func summary(excludingWeekdays exWeekdays: Set<Int>, excludingMonths exMonths: Set<Int> = []) -> FilteredSummary {
+        if exWeekdays.isEmpty && exMonths.isEmpty {
             return FilteredSummary(
                 totalTrades: totalTrades, wins: wins, losses: losses, draws: draws,
                 winRate: winRate, averageReturn: averageReturn, cumulativeReturn: cumulativeReturn
             )
         }
-        let calendar = Calendar.current
-        let filtered = trades.filter { !excluded.contains(calendar.component(.weekday, from: $0.buyDate)) }
+        let filtered = filteredTrades(excludingWeekdays: exWeekdays, excludingMonths: exMonths)
         guard !filtered.isEmpty else {
             return FilteredSummary(totalTrades: 0, wins: 0, losses: 0, draws: 0, winRate: 0, averageReturn: 0, cumulativeReturn: 0)
         }
@@ -488,15 +551,15 @@ extension OvernightWinRateResult {
         )
     }
 
-    /// 指定した曜日（買った日の曜日）を除外して、期間別成績を再計算する。
+    /// 指定した曜日・月（買った日基準）を除外して、期間別成績を再計算する。
     /// 除外すると建玉サイズ（複利）や金利の推移が変わるので、資産推移から作り直す。
-    func periodPerformanceList(breakdown: WinRateBreakdown, excludingWeekdays excluded: Set<Int>) -> [OvernightPeriodPerformance] {
+    func periodPerformanceList(breakdown: WinRateBreakdown, excludingWeekdays exWeekdays: Set<Int>, excludingMonths exMonths: Set<Int> = []) -> [OvernightPeriodPerformance] {
         // 何も除外していなければ事前計算済みを返す
-        if excluded.isEmpty {
+        if exWeekdays.isEmpty && exMonths.isEmpty {
             return periodPerformance[breakdown] ?? []
         }
         let calendar = Calendar.current
-        let filtered = trades.filter { !excluded.contains(calendar.component(.weekday, from: $0.buyDate)) }
+        let filtered = filteredTrades(excludingWeekdays: exWeekdays, excludingMonths: exMonths)
         let startDate = bars.first?.date ?? Date()
         let equity = Self.simulateEquityCurve(
             trades: filtered,
@@ -904,6 +967,9 @@ struct OvernightWinRateResultCard: View {
     /// チェックを外した（平均損益率の集計から除外する）曜日の集合
     @State private var excludedWeekdays: Set<Int> = []
 
+    /// チェックを外した（＝その月は取引しないとして集計から除外する）月の集合（1〜12）
+    @State private var excludedMonths: Set<Int> = []
+
     /// 成績一覧の集計単位（年/月/週/日）
     @State private var breakdown: WinRateBreakdown = .year
 
@@ -926,9 +992,14 @@ struct OvernightWinRateResultCard: View {
             .joined(separator: "・")
     }
 
-    /// 曜日チェックに連動した上部サマリー
+    /// 除外中の月名（1月・8月 …）を並べた文字列（成績一覧の注記用）
+    private var excludedMonthNames: String {
+        excludedMonths.sorted().map { "\($0)月" }.joined(separator: "・")
+    }
+
+    /// 曜日・月チェックに連動した上部サマリー
     private var summary: OvernightWinRateResult.FilteredSummary {
-        result.summary(excludingWeekdays: excludedWeekdays)
+        result.summary(excludingWeekdays: excludedWeekdays, excludingMonths: excludedMonths)
     }
 
     var body: some View {
@@ -955,9 +1026,14 @@ struct OvernightWinRateResultCard: View {
                 Spacer()
             }
 
-            // 曜日チェックを外している場合は、その曜日を除外した集計であることを明示
+            // 曜日・月チェックを外している場合は、それを除外した集計であることを明示
             if !excludedWeekdays.isEmpty {
                 Text("※ \(excludedWeekdayNames) を除外した集計")
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
+            }
+            if !excludedMonths.isEmpty {
+                Text("※ \(excludedMonthNames) は取引しないとして除外した集計")
                     .font(.system(size: 11))
                     .foregroundColor(.orange)
             }
@@ -985,6 +1061,12 @@ struct OvernightWinRateResultCard: View {
             if !result.weekdayPerformance.isEmpty {
                 Divider()
                 weekdayList
+            }
+
+            // 月ごとの成績（季節性）は複数年ぶんのデータがある長期表示のときだけ出す
+            if showsMonthly {
+                Divider()
+                monthlyList
             }
 
             if result.equityCurve.count >= 2 {
@@ -1173,12 +1255,99 @@ struct OvernightWinRateResultCard: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
+    /// 月ごとの成績（季節性）を表示するか。複数年ぶん（約1年超）のデータがある長期表示のときだけ出す。
+    private var showsMonthly: Bool {
+        guard !result.monthlyPerformance.isEmpty,
+              let s = result.startDate, let e = result.endDate else { return false }
+        return e.timeIntervalSince(s) > 366 * 24 * 60 * 60
+    }
+
+    /// 月（1〜12月）ごとの成績一覧。曜日別と同じ体裁で、全期間を通した季節性を見る。
+    @ViewBuilder
+    private var monthlyList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("月ごとの成績（買った月・全期間通算＝季節性）")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            Text("複数年ぶんの同じ月をまとめた勝率・平均。チェックを外した月は「その月は取引しない」として上部サマリー・期間別成績から除外される。")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+
+            // ヘッダー（先頭にチェックボックスぶんの余白）
+            HStack {
+                Spacer().frame(width: 28)
+                Text("月").frame(width: 44, alignment: .leading)
+                Text("回数").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("平均損益率").frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+
+            ForEach(result.monthlyPerformance) { m in
+                let isSelected = !excludedMonths.contains(m.month)
+                HStack(spacing: 0) {
+                    // チェックボックス（タップでその月を取引対象から外す/戻す）
+                    Button {
+                        if isSelected {
+                            excludedMonths.insert(m.month)
+                        } else {
+                            excludedMonths.remove(m.month)
+                        }
+                    } label: {
+                        Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 18))
+                            .foregroundColor(isSelected ? .accentColor : .secondary)
+                            .frame(width: 28, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+
+                VStack(spacing: 2) {
+                    // 上段: 月 / 回数 / 勝率 / 平均損益率
+                    HStack {
+                        Text(m.shortName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 44, alignment: .leading)
+                        Text("\(m.trades)")
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%.0f%%", m.winRate))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(m.winRate >= 50 ? .red : .blue)
+                        Text(String(format: "%+.3f%%", m.averageReturn))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(m.averageReturn >= 0 ? .red : .blue)
+                    }
+                    .font(.system(size: 13, design: .monospaced))
+
+                    // 下段: 平均利益 / 平均損失 / ペイオフ / 最大の負け
+                    HStack {
+                        Spacer().frame(width: 44)
+                        weekdaySubMetric(title: "平均利益", value: String(format: "%+.2f%%", m.averageWin))
+                        weekdaySubMetric(title: "平均損失", value: String(format: "%+.2f%%", m.averageLoss))
+                        weekdaySubMetric(title: "ペイオフ", value: m.payoffRatio.map { String(format: "%.2f", $0) } ?? "—")
+                        weekdaySubMetric(title: "最大の負け", value: String(format: "%.2f%%", m.worstReturn))
+                    }
+                }
+                }
+                .opacity(isSelected ? 1 : 0.4)
+                .padding(.vertical, 4)
+                .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isSelected && m.averageReturn < 0 ? Color.blue.opacity(0.08) : Color.clear)
+                )
+            }
+        }
+    }
+
     /// 期間ごとのパフォーマンス一覧（年/月/週/日を切り替え可能）
     @ViewBuilder
     private var periodList: some View {
         // 件数が多い（日・週など）と描画が重いので直近ぶんだけ表示する
         let cap = 200
-        let full = result.periodPerformanceList(breakdown: breakdown, excludingWeekdays: excludedWeekdays)
+        let full = result.periodPerformanceList(breakdown: breakdown, excludingWeekdays: excludedWeekdays, excludingMonths: excludedMonths)
         let truncated = full.count > cap
         let list = truncated ? Array(full.suffix(cap)) : full
 
@@ -1203,6 +1372,11 @@ struct OvernightWinRateResultCard: View {
             // 曜日チェックを外している場合は、その曜日を除外して集計していることを明示
             if !excludedWeekdays.isEmpty {
                 Text("※ チェックを外した曜日（\(excludedWeekdayNames)）を除外して集計")
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange)
+            }
+            if !excludedMonths.isEmpty {
+                Text("※ チェックを外した月（\(excludedMonthNames)）を除外して集計")
                     .font(.system(size: 10))
                     .foregroundColor(.orange)
             }
