@@ -38,6 +38,17 @@ final class MyStockChartData {
         low = sendableStockChartData.low
         high = sendableStockChartData.high
     }
+
+    /// 任意の値から直接生成する（分足を合成した日足など、APIレスポンス以外から作る用途）
+    init(date: Date?, open: Float?, close: Float?, high: Float? = nil, low: Float? = nil, adjclose: Float? = nil, volume: Int? = nil) {
+        self.date = date
+        self.open = open
+        self.close = close
+        self.high = high
+        self.low = low
+        self.adjclose = adjclose ?? close
+        self.volume = volume
+    }
 }
 
 struct MyStockChartDataSendable: Sendable {

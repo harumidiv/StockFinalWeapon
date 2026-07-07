@@ -100,7 +100,7 @@ struct HomeTabView: View {
                         }
                         .tag(AppTab.winRate)
                 case .intradayWinRate:
-                    OvernightWinRateScreen(strategy: .intraday)
+                    OvernightWinRateScreen(strategy: .intraday, selectableStrategies: [.intraday, .lunchBreak])
                         .tabItem {
                             Label(AppTab.intradayWinRate.title, systemImage: AppTab.intradayWinRate.icon)
                         }

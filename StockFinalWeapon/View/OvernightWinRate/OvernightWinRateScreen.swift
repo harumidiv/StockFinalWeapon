@@ -83,6 +83,8 @@ enum WinRateStrategy: String, CaseIterable, Identifiable {
     case overnight
     /// 当日始値で買い、当日終値で売る（デイトレード・日計り）
     case intraday
+    /// 前場引け（11:30頃）で買い、後場寄り（12:30）で売る（昼休みをまたぐ日計り）
+    case lunchBreak
 
     var id: Self { self }
 
@@ -91,6 +93,7 @@ enum WinRateStrategy: String, CaseIterable, Identifiable {
         switch self {
         case .overnight: return "引in→寄out 勝率"
         case .intraday: return "寄in→引out 勝率"
+        case .lunchBreak: return "前引→後場寄 勝率"
         }
     }
 
@@ -99,6 +102,7 @@ enum WinRateStrategy: String, CaseIterable, Identifiable {
         switch self {
         case .overnight: return "当日の終値で買い、翌日の始値で売った場合（オーバーナイト保有）の勝率を集計します。"
         case .intraday: return "当日の始値で買い、当日の終値で売った場合（デイトレード）の勝率を集計します。"
+        case .lunchBreak: return "前場の引け（11:30頃）で買い、後場の寄り（12:30）で売った場合の勝率を集計します。日中足を使うため、Yahoo Finance側の制限で直近約60日ぶんのみが対象です。"
         }
     }
 
@@ -107,8 +111,21 @@ enum WinRateStrategy: String, CaseIterable, Identifiable {
         switch self {
         case .overnight: return "オーバーナイト"
         case .intraday: return "デイトレ"
+        case .lunchBreak: return "前引→後場寄"
         }
     }
+
+    /// 戦略切り替えセグメント用の短いラベル
+    var pickerLabel: String {
+        switch self {
+        case .overnight: return "引→翌寄"
+        case .intraday: return "寄→引"
+        case .lunchBreak: return "前引→後場寄"
+        }
+    }
+
+    /// 日中足（30分足）が必要な戦略か。true の場合は取得期間が直近約60日に制限される。
+    var requiresIntradayData: Bool { self == .lunchBreak }
 }
 
 /// 資産推移チャートの1点（初期投資額をそろえて各戦略を比較する）
@@ -168,6 +185,27 @@ struct OvernightWeekdayPerformance: Identifiable {
     }
 }
 
+/// 月（1〜12月）ごとのパフォーマンス（エントリー日=買った日の月で全期間を通して集計＝季節性）
+struct OvernightMonthlyPerformance: Identifiable {
+    var id: Int { month }
+    let month: Int               // 1...12
+    let trades: Int              // その月のトレード回数
+    let winRate: Double          // その月の勝率（％）
+    let averageReturn: Double    // その月の1トレードあたり平均損益率（％）
+    let averageWin: Double       // 勝ちトレードの平均利益率（％）。勝ちが無ければ0
+    let averageLoss: Double      // 負けトレードの平均損失率（％・負値）。負けが無ければ0
+    let worstReturn: Double      // その月の最大の負け（1トレードの最悪損益率・％）。負けが無ければ0
+
+    /// ペイオフレシオ（平均利益率 ÷ 平均損失率の絶対値）。負けが無い場合は nil。
+    var payoffRatio: Double? {
+        guard averageLoss < 0 else { return nil }
+        return averageWin / abs(averageLoss)
+    }
+
+    /// 「1月」などの表記
+    var shortName: String { "\(month)月" }
+}
+
 /// 集計結果
 struct OvernightWinRateResult {
     let code: String
@@ -183,6 +221,7 @@ struct OvernightWinRateResult {
     let equityCurve: [OvernightEquityPoint] // 資産推移（2戦略の比較用）
     let periodPerformance: [WinRateBreakdown: [OvernightPeriodPerformance]] // 年/月/週/日ごとの成績
     let weekdayPerformance: [OvernightWeekdayPerformance] // 曜日ごとの成績（エントリー日の曜日で集計）
+    let monthlyPerformance: [OvernightMonthlyPerformance] // 月（1〜12月）ごとの成績（エントリー日の月で集計＝季節性）
     let isCompounding: Bool // オーバーナイト戦略を複利で計算したか（false=単利・100株固定）
     let lotSize: Int        // 複利時の売買単位（1株単位 or 100株単位）
     let startDate: Date?
@@ -202,7 +241,10 @@ extension OvernightWinRateResult {
     ///   - strategy: .overnight=当日終値で買い翌日始値で売る / .intraday=当日始値で買い当日終値で売る
     ///   - compounding: true=複利（損益を再投資して建玉を増やす）, false=単利（100株固定）
     ///   - lotSize: 複利時の売買単位（1=1株単位, 100=100株単位）。余りは現金として持ち越す。
-    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int) -> OvernightWinRateResult? {
+    ///   - principal: 指定元本（円）。nil または 0以下 のときは従来どおり「最初の終値で100株」を元本とする。
+    ///                指定時は開始時にその金額で買える整数単元（100株単位・最低1単元）を建玉の基準とし、
+    ///                単利の固定株数・複利の初期資金・ずっと保有の株数すべてに反映する。
+    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int, principal: Double? = nil) -> OvernightWinRateResult? {
         // 有効な始値・終値のみを日付昇順に整理
         let bars = candles
             .compactMap { c -> (date: Date, open: Float, close: Float)? in
@@ -213,10 +255,21 @@ extension OvernightWinRateResult {
 
         guard bars.count >= 2 else { return nil }
 
-        // 初期投資額をそろえる（最初の終値で 100株 買った金額）
-        let shares = 100.0
+        // 初期投資額（元本）を決める。
+        // - 元本未指定: 従来どおり「最初の終値で100株」を元本とする
+        // - 元本指定: その金額で買える整数単元（100株単位・最低1単元）を建玉の基準とし、元本=指定額
         let firstClose = bars.first!.close
-        let initialCapital = Double(firstClose) * shares
+        let shares: Double
+        let initialCapital: Double
+        if let principal, principal > 0 {
+            let unitPrice = Double(firstClose) * 100 // 1単元（100株）の金額
+            let units = unitPrice > 0 ? max(1.0, (principal / unitPrice).rounded(.down)) : 1.0
+            shares = units * 100
+            initialCapital = principal
+        } else {
+            shares = 100.0
+            initialCapital = Double(firstClose) * shares
+        }
 
         // 複利（全額再投資）か単利（100株固定でキャッシュに積み上げ）か
         let useCompounding = compounding
@@ -232,7 +285,9 @@ extension OvernightWinRateResult {
                 let daysHeld = max(1, calendar.dateComponents([.day], from: bars[i].date, to: bars[i + 1].date).day ?? 1)
                 return (bars[i].close, bars[i + 1].open, bars[i].date, bars[i + 1].date, bars[i + 1].close, daysHeld)
             }
-        case .intraday:
+        case .intraday, .lunchBreak:
+            // どちらも当日内で完結する日計り（保有日数=0=金利なし）。
+            // .lunchBreak は合成日足の open=前場引け・close=後場寄り をそのまま買値・売値に使う。
             trades = (0..<bars.count).map { i in
                 (bars[i].open, bars[i].close, bars[i].date, bars[i].date, bars[i].close, 0)
             }
@@ -255,6 +310,9 @@ extension OvernightWinRateResult {
         var returnSum = 0.0
         // winReturnSum=勝ちトレードの損益率合計 / lossReturnSum=負けトレードの損益率合計(負値) / worst=最悪の1トレード
         var weekdayStats: [Int: (trades: Int, wins: Int, returnSum: Double, lossCount: Int, winReturnSum: Double, lossReturnSum: Double, worst: Double)] = [:]
+        // 月（1〜12）別集計（買った日の月で全期間を通して集計＝季節性）。曜日と同じ内訳を持つ。
+        typealias Bucket = (trades: Int, wins: Int, returnSum: Double, lossCount: Int, winReturnSum: Double, lossReturnSum: Double, worst: Double)
+        var monthStats: [Int: Bucket] = [:]
         for t in trades {
             let buy = t.buy
             let sell = t.sell
@@ -282,6 +340,20 @@ extension OvernightWinRateResult {
                 ws.worst = min(ws.worst, ret)
             }
             weekdayStats[weekday] = ws
+
+            let month = calendar.component(.month, from: t.buyDate)
+            var ms = monthStats[month] ?? (trades: 0, wins: 0, returnSum: 0.0, lossCount: 0, winReturnSum: 0.0, lossReturnSum: 0.0, worst: 0.0)
+            ms.trades += 1
+            ms.returnSum += ret
+            if sell > buy {
+                ms.wins += 1
+                ms.winReturnSum += ret
+            } else if sell < buy {
+                ms.lossCount += 1
+                ms.lossReturnSum += ret
+                ms.worst = min(ms.worst, ret)
+            }
+            monthStats[month] = ms
         }
 
         let total = trades.count
@@ -320,6 +392,20 @@ extension OvernightWinRateResult {
             )
         }
 
+        // 月ごとの成績を1月→12月の順で並べる（トレードのあった月のみ）
+        let monthlyPerformance: [OvernightMonthlyPerformance] = (1...12).compactMap { m in
+            guard let s = monthStats[m], s.trades > 0 else { return nil }
+            return OvernightMonthlyPerformance(
+                month: m,
+                trades: s.trades,
+                winRate: Double(s.wins) / Double(s.trades) * 100,
+                averageReturn: s.returnSum / Double(s.trades) * 100,
+                averageWin: s.wins > 0 ? s.winReturnSum / Double(s.wins) * 100 : 0,
+                averageLoss: s.lossCount > 0 ? s.lossReturnSum / Double(s.lossCount) * 100 : 0,
+                worstReturn: s.worst * 100
+            )
+        }
+
         return OvernightWinRateResult(
             code: code,
             strategy: strategy,
@@ -334,6 +420,7 @@ extension OvernightWinRateResult {
             equityCurve: equityCurve,
             periodPerformance: periodPerformance,
             weekdayPerformance: weekdayPerformance,
+            monthlyPerformance: monthlyPerformance,
             isCompounding: useCompounding,
             lotSize: lotSize,
             startDate: bars.first?.date,
@@ -415,17 +502,26 @@ extension OvernightWinRateResult {
         let cumulativeReturn: Double
     }
 
-    /// 指定した曜日（買った日の曜日）を除外したサマリーを返す。
+    /// 買った日が、除外対象の曜日または月に該当するトレードを取り除く。
+    private func filteredTrades(excludingWeekdays exWeekdays: Set<Int>, excludingMonths exMonths: Set<Int>)
+    -> [(buy: Float, sell: Float, buyDate: Date, sellDate: Date, sellClose: Float, daysHeld: Int)] {
+        let calendar = Calendar.current
+        return trades.filter {
+            !exWeekdays.contains(calendar.component(.weekday, from: $0.buyDate))
+            && !exMonths.contains(calendar.component(.month, from: $0.buyDate))
+        }
+    }
+
+    /// 指定した曜日・月（買った日基準）を除外したサマリーを返す。
     /// 除外なしなら事前計算済みの値をそのまま返す。
-    func summary(excludingWeekdays excluded: Set<Int>) -> FilteredSummary {
-        if excluded.isEmpty {
+    func summary(excludingWeekdays exWeekdays: Set<Int>, excludingMonths exMonths: Set<Int> = []) -> FilteredSummary {
+        if exWeekdays.isEmpty && exMonths.isEmpty {
             return FilteredSummary(
                 totalTrades: totalTrades, wins: wins, losses: losses, draws: draws,
                 winRate: winRate, averageReturn: averageReturn, cumulativeReturn: cumulativeReturn
             )
         }
-        let calendar = Calendar.current
-        let filtered = trades.filter { !excluded.contains(calendar.component(.weekday, from: $0.buyDate)) }
+        let filtered = filteredTrades(excludingWeekdays: exWeekdays, excludingMonths: exMonths)
         guard !filtered.isEmpty else {
             return FilteredSummary(totalTrades: 0, wins: 0, losses: 0, draws: 0, winRate: 0, averageReturn: 0, cumulativeReturn: 0)
         }
@@ -455,15 +551,15 @@ extension OvernightWinRateResult {
         )
     }
 
-    /// 指定した曜日（買った日の曜日）を除外して、期間別成績を再計算する。
+    /// 指定した曜日・月（買った日基準）を除外して、期間別成績を再計算する。
     /// 除外すると建玉サイズ（複利）や金利の推移が変わるので、資産推移から作り直す。
-    func periodPerformanceList(breakdown: WinRateBreakdown, excludingWeekdays excluded: Set<Int>) -> [OvernightPeriodPerformance] {
+    func periodPerformanceList(breakdown: WinRateBreakdown, excludingWeekdays exWeekdays: Set<Int>, excludingMonths exMonths: Set<Int> = []) -> [OvernightPeriodPerformance] {
         // 何も除外していなければ事前計算済みを返す
-        if excluded.isEmpty {
+        if exWeekdays.isEmpty && exMonths.isEmpty {
             return periodPerformance[breakdown] ?? []
         }
         let calendar = Calendar.current
-        let filtered = trades.filter { !excluded.contains(calendar.component(.weekday, from: $0.buyDate)) }
+        let filtered = filteredTrades(excludingWeekdays: exWeekdays, excludingMonths: exMonths)
         let startDate = bars.first?.date ?? Date()
         let equity = Self.simulateEquityCurve(
             trades: filtered,
@@ -569,9 +665,14 @@ final class OvernightWinRateViewModel: ObservableObject {
     @Published var isCompounding = false
     /// 複利時の売買単位（1=1株単位, 100=100株単位）
     @Published var lotSize = 100
+    /// 指定元本（円）。nil のときは「最初の終値で100株」を元本とする
+    @Published var principal: Double?
 
-    /// 検証する売買戦略（引→翌寄 / 寄→引）
-    let strategy: WinRateStrategy
+    /// 検証する売買戦略（引→翌寄 / 寄→引 / 前引→後場寄）
+    @Published var strategy: WinRateStrategy
+
+    /// 日中足戦略で遡れる最大日数（Yahoo Finance の30分足は直近約60日まで）
+    static let intradayLookbackLimitDays = 59
 
     // 取得済みのデータ。複利/単利の切り替え時に再取得せず手元で再計算するために保持する。
     private var lastCandles: [MyStockChartData] = []
@@ -579,6 +680,14 @@ final class OvernightWinRateViewModel: ObservableObject {
 
     init(strategy: WinRateStrategy = .overnight) {
         self.strategy = strategy
+    }
+
+    /// 戦略切り替えなどでデータ源が変わる際に、取得済みデータと結果をクリアする。
+    func reset() {
+        result = nil
+        errorMessage = nil
+        lastCandles = []
+        lastCode = ""
     }
 
     /// 今日から period.days 分遡って集計する
@@ -599,18 +708,31 @@ final class OvernightWinRateViewModel: ObservableObject {
             return
         }
 
+        // 日中足（前引→後場寄）は直近約60日しか遡れないため、開始日をその範囲に丸める
+        var effectiveStart = start
+        if strategy.requiresIntradayData,
+           let minStart = Calendar.current.date(byAdding: .day, value: -Self.intradayLookbackLimitDays, to: end),
+           effectiveStart < minStart {
+            effectiveStart = minStart
+        }
+
         isLoading = true
         errorMessage = nil
         result = nil
 
-        let apiResult = await YahooYFinanceAPIService().fetchStockChartData(code: trimmed, startDate: start, endDate: end)
+        let service = YahooYFinanceAPIService()
+        let apiResult = strategy.requiresIntradayData
+            ? await service.fetchLunchBreakBars(code: trimmed, startDate: effectiveStart, endDate: end)
+            : await service.fetchStockChartData(code: trimmed, startDate: effectiveStart, endDate: end)
 
         switch apiResult {
         case .success(let candles):
             lastCandles = candles
             lastCode = trimmed
-            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, strategy: strategy, compounding: isCompounding, lotSize: lotSize) else {
-                errorMessage = "データが不足しています。銘柄コードと期間をご確認ください。"
+            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal) else {
+                errorMessage = strategy.requiresIntradayData
+                    ? "データが不足しています。日中足は直近約60日ぶんのみ取得できます。銘柄コードと期間をご確認ください。"
+                    : "データが不足しています。銘柄コードと期間をご確認ください。"
                 isLoading = false
                 return
             }
@@ -626,7 +748,7 @@ final class OvernightWinRateViewModel: ObservableObject {
     /// 複利/単利・売買単位の切り替え時に、取得済みデータから再計算する（通信なし）
     func recompute() {
         guard !lastCandles.isEmpty else { return }
-        result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, strategy: strategy, compounding: isCompounding, lotSize: lotSize)
+        result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal)
     }
 }
 
@@ -638,22 +760,35 @@ enum WinRateRangeMode: String, CaseIterable, Identifiable {
 }
 
 struct OvernightWinRateScreen: View {
-    let strategy: WinRateStrategy
+    /// このタブで選べる戦略。2つ以上あるとフォーム上部に切り替えセグメントを表示する。
+    let selectableStrategies: [WinRateStrategy]
     @StateObject private var viewModel: OvernightWinRateViewModel
     @State private var code: String = ""
+    @State private var principalText: String = ""
     @State private var period: WinRatePeriod = .oneYear
     @State private var rangeMode: WinRateRangeMode = .preset
     @State private var startDate: Date = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
     @State private var endDate: Date = Date()
     @FocusState private var isFocused: Bool
 
-    init(strategy: WinRateStrategy = .overnight) {
-        self.strategy = strategy
+    init(strategy: WinRateStrategy = .overnight, selectableStrategies: [WinRateStrategy]? = nil) {
+        self.selectableStrategies = selectableStrategies ?? [strategy]
         _viewModel = StateObject(wrappedValue: OvernightWinRateViewModel(strategy: strategy))
+    }
+
+    /// 入力された元本テキストを円に変換する（カンマ・空白は無視。未入力/0以下は nil=100株基準）
+    private var parsedPrincipal: Double? {
+        let cleaned = principalText
+            .replacingOccurrences(of: ",", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard let value = Double(cleaned), value > 0 else { return nil }
+        return value
     }
 
     /// 現在のモードに応じて計算を実行
     private func runCalculation() async {
+        viewModel.principal = parsedPrincipal
         switch rangeMode {
         case .preset:
             await viewModel.calculate(code: code, period: period)
@@ -678,7 +813,27 @@ struct OvernightWinRateScreen: View {
         NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(strategy.formDescription)
+                    // 戦略の切り替え（このタブに複数戦略があるときだけ表示）
+                    if selectableStrategies.count > 1 {
+                        Picker("戦略", selection: $viewModel.strategy) {
+                            ForEach(selectableStrategies) { s in
+                                Text(s.pickerLabel).tag(s)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: viewModel.strategy) { _, newValue in
+                            // データ源が変わるので取得済みデータを破棄し、日中足戦略では期間を60日以内に丸める
+                            viewModel.reset()
+                            if newValue.requiresIntradayData, period.days > OvernightWinRateViewModel.intradayLookbackLimitDays {
+                                period = .oneMonth
+                            }
+                            if !code.trimmingCharacters(in: .whitespaces).isEmpty {
+                                Task { await runCalculation() }
+                            }
+                        }
+                    }
+
+                    Text(viewModel.strategy.formDescription)
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
 
@@ -688,6 +843,21 @@ struct OvernightWinRateScreen: View {
                             .focused($isFocused)
                             .keyboardType(.numbersAndPunctuation)
                             .textFieldStyle(.roundedBorder)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            TextField("元本 (円・未入力なら100株)", text: $principalText)
+                                .focused($isFocused)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                                .onChange(of: principalText) { _, _ in
+                                    // 取得済みデータから即再計算（通信なし）。未計算なら no-op。
+                                    viewModel.principal = parsedPrincipal
+                                    viewModel.recompute()
+                                }
+                            Text("指定した元本で買える整数単元（100株単位・最低1単元）で検証します。")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
 
                         Picker("指定方法", selection: $rangeMode) {
                             ForEach(WinRateRangeMode.allCases) { m in
@@ -767,10 +937,10 @@ struct OvernightWinRateScreen: View {
                 }
                 .padding()
             }
-            .navigationTitle(strategy.navigationTitle)
+            .navigationTitle(viewModel.strategy.navigationTitle)
             .toolbar {
                 // ランキング一覧はオーバーナイト戦略専用。デイトレでは表示しない。
-                if strategy == .overnight {
+                if viewModel.strategy == .overnight {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         NavigationLink {
                             let range = resolvedRange
@@ -779,6 +949,11 @@ struct OvernightWinRateScreen: View {
                             Image(systemName: "list.number")
                         }
                     }
+                }
+                // 数字キーボード（銘柄コード・元本）には確定キーが無いので、閉じるボタンを用意する
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("閉じる") { isFocused = false }
                 }
             }
         }
@@ -791,6 +966,9 @@ struct OvernightWinRateResultCard: View {
 
     /// チェックを外した（平均損益率の集計から除外する）曜日の集合
     @State private var excludedWeekdays: Set<Int> = []
+
+    /// チェックを外した（＝その月は取引しないとして集計から除外する）月の集合（1〜12）
+    @State private var excludedMonths: Set<Int> = []
 
     /// 成績一覧の集計単位（年/月/週/日）
     @State private var breakdown: WinRateBreakdown = .year
@@ -814,9 +992,14 @@ struct OvernightWinRateResultCard: View {
             .joined(separator: "・")
     }
 
-    /// 曜日チェックに連動した上部サマリー
+    /// 除外中の月名（1月・8月 …）を並べた文字列（成績一覧の注記用）
+    private var excludedMonthNames: String {
+        excludedMonths.sorted().map { "\($0)月" }.joined(separator: "・")
+    }
+
+    /// 曜日・月チェックに連動した上部サマリー
     private var summary: OvernightWinRateResult.FilteredSummary {
-        result.summary(excludingWeekdays: excludedWeekdays)
+        result.summary(excludingWeekdays: excludedWeekdays, excludingMonths: excludedMonths)
     }
 
     var body: some View {
@@ -843,9 +1026,14 @@ struct OvernightWinRateResultCard: View {
                 Spacer()
             }
 
-            // 曜日チェックを外している場合は、その曜日を除外した集計であることを明示
+            // 曜日・月チェックを外している場合は、それを除外した集計であることを明示
             if !excludedWeekdays.isEmpty {
                 Text("※ \(excludedWeekdayNames) を除外した集計")
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
+            }
+            if !excludedMonths.isEmpty {
+                Text("※ \(excludedMonthNames) は取引しないとして除外した集計")
                     .font(.system(size: 11))
                     .foregroundColor(.orange)
             }
@@ -875,6 +1063,12 @@ struct OvernightWinRateResultCard: View {
                 weekdayList
             }
 
+            // 月ごとの成績（季節性）は複数年ぶんのデータがある長期表示のときだけ出す
+            if showsMonthly {
+                Divider()
+                monthlyList
+            }
+
             if result.equityCurve.count >= 2 {
                 Divider()
                 equityChart
@@ -892,17 +1086,20 @@ struct OvernightWinRateResultCard: View {
         )
     }
 
+    /// 建玉株数（単利・ずっと保有で使う固定株数）を整数表記した文字列
+    private var sharesText: String { "\(Int(result.shares))" }
+
     private var overnightLabel: String {
-        result.isCompounding ? "\(result.strategy.shortLabel)（複利/\(result.lotSize)株単位）" : "\(result.strategy.shortLabel)（単利・100株）"
+        result.isCompounding ? "\(result.strategy.shortLabel)（複利/\(result.lotSize)株単位）" : "\(result.strategy.shortLabel)（単利・\(sharesText)株）"
     }
     private static let overnightNetLabel = "税・金利控除後（手取り）"
-    private static let buyAndHoldLabel = "ずっと保有（100株）"
+    private var buyAndHoldLabel: String { "ずっと保有（\(sharesText)株）" }
 
     /// 初期投資額をそろえた各戦略の資産推移チャート
     @ViewBuilder
     private var equityChart: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("資産推移（初期投資 = 最初の終値で100株購入）")
+            Text("資産推移（初期投資 = \(OvernightWinRateResultCard.plainYenText(result.initialCapital)) / \(sharesText)株）")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
@@ -923,12 +1120,12 @@ struct OvernightWinRateResultCard: View {
                     x: .value("日付", point.date),
                     y: .value("評価額", point.buyAndHold)
                 )
-                .foregroundStyle(by: .value("系列", Self.buyAndHoldLabel))
+                .foregroundStyle(by: .value("系列", buyAndHoldLabel))
             }
             .chartForegroundStyleScale([
                 overnightLabel: Color.orange,
                 Self.overnightNetLabel: Color.red,
-                Self.buyAndHoldLabel: Color.blue
+                buyAndHoldLabel: Color.blue
             ])
             .chartYAxis {
                 AxisMarks { value in
@@ -1058,17 +1255,104 @@ struct OvernightWinRateResultCard: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
+    /// 月ごとの成績（季節性）を表示するか。複数年ぶん（約1年超）のデータがある長期表示のときだけ出す。
+    private var showsMonthly: Bool {
+        guard !result.monthlyPerformance.isEmpty,
+              let s = result.startDate, let e = result.endDate else { return false }
+        return e.timeIntervalSince(s) > 366 * 24 * 60 * 60
+    }
+
+    /// 月（1〜12月）ごとの成績一覧。曜日別と同じ体裁で、全期間を通した季節性を見る。
+    @ViewBuilder
+    private var monthlyList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("月ごとの成績（買った月・全期間通算＝季節性）")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            Text("複数年ぶんの同じ月をまとめた勝率・平均。チェックを外した月は「その月は取引しない」として上部サマリー・期間別成績から除外される。")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+
+            // ヘッダー（先頭にチェックボックスぶんの余白）
+            HStack {
+                Spacer().frame(width: 28)
+                Text("月").frame(width: 44, alignment: .leading)
+                Text("回数").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("平均損益率").frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+
+            ForEach(result.monthlyPerformance) { m in
+                let isSelected = !excludedMonths.contains(m.month)
+                HStack(spacing: 0) {
+                    // チェックボックス（タップでその月を取引対象から外す/戻す）
+                    Button {
+                        if isSelected {
+                            excludedMonths.insert(m.month)
+                        } else {
+                            excludedMonths.remove(m.month)
+                        }
+                    } label: {
+                        Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 18))
+                            .foregroundColor(isSelected ? .accentColor : .secondary)
+                            .frame(width: 28, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+
+                VStack(spacing: 2) {
+                    // 上段: 月 / 回数 / 勝率 / 平均損益率
+                    HStack {
+                        Text(m.shortName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 44, alignment: .leading)
+                        Text("\(m.trades)")
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%.0f%%", m.winRate))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(m.winRate >= 50 ? .red : .blue)
+                        Text(String(format: "%+.3f%%", m.averageReturn))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(m.averageReturn >= 0 ? .red : .blue)
+                    }
+                    .font(.system(size: 13, design: .monospaced))
+
+                    // 下段: 平均利益 / 平均損失 / ペイオフ / 最大の負け
+                    HStack {
+                        Spacer().frame(width: 44)
+                        weekdaySubMetric(title: "平均利益", value: String(format: "%+.2f%%", m.averageWin))
+                        weekdaySubMetric(title: "平均損失", value: String(format: "%+.2f%%", m.averageLoss))
+                        weekdaySubMetric(title: "ペイオフ", value: m.payoffRatio.map { String(format: "%.2f", $0) } ?? "—")
+                        weekdaySubMetric(title: "最大の負け", value: String(format: "%.2f%%", m.worstReturn))
+                    }
+                }
+                }
+                .opacity(isSelected ? 1 : 0.4)
+                .padding(.vertical, 4)
+                .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isSelected && m.averageReturn < 0 ? Color.blue.opacity(0.08) : Color.clear)
+                )
+            }
+        }
+    }
+
     /// 期間ごとのパフォーマンス一覧（年/月/週/日を切り替え可能）
     @ViewBuilder
     private var periodList: some View {
         // 件数が多い（日・週など）と描画が重いので直近ぶんだけ表示する
         let cap = 200
-        let full = result.periodPerformanceList(breakdown: breakdown, excludingWeekdays: excludedWeekdays)
+        let full = result.periodPerformanceList(breakdown: breakdown, excludingWeekdays: excludedWeekdays, excludingMonths: excludedMonths)
         let truncated = full.count > cap
         let list = truncated ? Array(full.suffix(cap)) : full
 
         VStack(alignment: .leading, spacing: 8) {
-            Text(result.isCompounding ? "期間ごとの成績（複利/\(result.lotSize)株単位 / 保有=100株）" : "期間ごとの成績（100株）")
+            Text(result.isCompounding ? "期間ごとの成績（複利/\(result.lotSize)株単位 / 保有=\(sharesText)株）" : "期間ごとの成績（\(sharesText)株）")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
@@ -1088,6 +1372,11 @@ struct OvernightWinRateResultCard: View {
             // 曜日チェックを外している場合は、その曜日を除外して集計していることを明示
             if !excludedWeekdays.isEmpty {
                 Text("※ チェックを外した曜日（\(excludedWeekdayNames)）を除外して集計")
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange)
+            }
+            if !excludedMonths.isEmpty {
+                Text("※ チェックを外した月（\(excludedMonthNames)）を除外して集計")
                     .font(.system(size: 10))
                     .foregroundColor(.orange)
             }
