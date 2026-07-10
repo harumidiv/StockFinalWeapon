@@ -224,6 +224,9 @@ struct OvernightWinRateResult {
     let monthlyPerformance: [OvernightMonthlyPerformance] // 月（1〜12月）ごとの成績（エントリー日の月で集計＝季節性）
     let isCompounding: Bool // オーバーナイト戦略を複利で計算したか（false=単利・100株固定）
     let lotSize: Int        // 複利時の売買単位（1株単位 or 100株単位）
+    let leverage: Double    // 信用レバレッジ倍率（1.0=現物相当 / 2.0 / 3.0）
+    let ruinDate: Date?     // 戦略が追証・ロスカットで評価額0になった日（=再起不能）。無ければ nil
+    let buyAndHoldRuinDate: Date? // ずっと保有（レバあり）が再起不能になった日。無ければ nil
     let startDate: Date?
     let endDate: Date?
 
@@ -244,7 +247,9 @@ extension OvernightWinRateResult {
     ///   - principal: 指定元本（円）。nil または 0以下 のときは従来どおり「最初の終値で100株」を元本とする。
     ///                指定時は開始時にその金額で買える整数単元（100株単位・最低1単元）を建玉の基準とし、
     ///                単利の固定株数・複利の初期資金・ずっと保有の株数すべてに反映する。
-    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int, principal: Double? = nil) -> OvernightWinRateResult? {
+    ///   - leverage: 信用取引のレバレッジ倍率（1.0〜3.0）。建玉を倍にして損益・金利を膨らませる。
+    ///               ベンチマークの「ずっと保有」には掛けない。
+    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int, principal: Double? = nil, leverage: Double = 1.0) -> OvernightWinRateResult? {
         // 有効な始値・終値のみを日付昇順に整理
         let bars = candles
             .compactMap { c -> (date: Date, open: Float, close: Float)? in
@@ -302,7 +307,8 @@ extension OvernightWinRateResult {
             initialCapital: initialCapital,
             shares: shares,
             compounding: useCompounding,
-            lotSize: lotSize
+            lotSize: lotSize,
+            leverage: leverage
         )
 
         // 勝敗・平均損益率・曜日別集計（曜日は買った日=エントリー日で集計）
@@ -359,9 +365,14 @@ extension OvernightWinRateResult {
         let total = trades.count
         let finalEquity = equityCurve.last?.overnight ?? initialCapital
 
-        // 期間中ずっと保有した場合の上昇率（最初の終値で買い、最後の終値で売る）
-        let lastClose = bars.last!.close
-        let buyAndHoldReturn = Double(lastClose - firstClose) / Double(firstClose) * 100
+        // 戦略・ずっと保有それぞれが評価額0になった（＝追証・ロスカットで再起不能になった）最初の日
+        let ruinDate = equityCurve.dropFirst().first(where: { $0.overnight <= 0 })?.date
+        let buyAndHoldRuinDate = equityCurve.dropFirst().first(where: { $0.buyAndHold <= 0 })?.date
+
+        // 期間中ずっと保有した場合のリターン（レバ・金利・ロスカットを反映した資産推移から算出）。
+        // レバ1倍なら (最後の終値 − 最初の終値) ÷ 最初の終値 に一致する。
+        let finalBuyAndHold = equityCurve.last?.buyAndHold ?? initialCapital
+        let buyAndHoldReturn = initialCapital != 0 ? (finalBuyAndHold - initialCapital) / initialCapital * 100 : 0
 
         // 年/月/週/日ごとの成績をまとめて集計
         var periodPerformance: [WinRateBreakdown: [OvernightPeriodPerformance]] = [:]
@@ -373,7 +384,9 @@ extension OvernightWinRateResult {
                 initialCapital: initialCapital,
                 shares: shares,
                 calendar: calendar,
-                breakdown: breakdown
+                breakdown: breakdown,
+                leverage: max(1.0, leverage),
+                holdRuinDate: buyAndHoldRuinDate
             )
         }
 
@@ -423,6 +436,9 @@ extension OvernightWinRateResult {
             monthlyPerformance: monthlyPerformance,
             isCompounding: useCompounding,
             lotSize: lotSize,
+            leverage: max(1.0, leverage),
+            ruinDate: ruinDate,
+            buyAndHoldRuinDate: buyAndHoldRuinDate,
             startDate: bars.first?.date,
             endDate: bars.last?.date,
             bars: bars,
@@ -433,7 +449,11 @@ extension OvernightWinRateResult {
     }
 
     /// トレード列から資産推移カーブ（複利/単利・信用金利・税を反映）を作る。
-    /// - 建玉株数: 複利=資金で買える整数単位ぶん / 単利=100株固定
+    /// - 建玉株数: 複利=資金で買える整数単位ぶん / 単利=100株固定。いずれもレバレッジ倍する。
+    /// - レバレッジ: 自己資金（元本）は変えず、建玉だけを leverage 倍にする（信用取引）。
+    ///   損益・信用金利がそのぶん膨らむ。ベンチマークの「ずっと保有」にも同倍率を掛け、
+    ///   借入ぶん（元本×(レバ-1)）に保有日数ぶんの信用金利をかけ、逆行で評価額が0以下になれば
+    ///   保有側もロスカット＝再起不能とする。レバ1倍のときは現物どおり（金利・破産なし）。
     /// - 信用取引なので、初期資金が1単位に満たなくても最低1単位は建てる（不足分は信用＝マージン）
     /// - 手取り: 金利を引いた後、含み益にのみ課税し、損失は満額負担
     private static func simulateEquityCurve(
@@ -442,12 +462,18 @@ extension OvernightWinRateResult {
         initialCapital: Double,
         shares: Double,
         compounding: Bool,
-        lotSize: Int
+        lotSize: Int,
+        leverage: Double = 1.0
     ) -> [OvernightEquityPoint] {
         let taxRate = 0.20315          // 譲渡益課税 20.315%
         let annualInterestRate = 0.028 // 信用金利 年2.8%
+        let lev = max(1.0, leverage)   // レバレッジ倍率（最低1倍）
 
-        var overnightEquity = initialCapital  // 戦略の評価額（コスト前）
+        let calendar = Calendar.current
+        // ずっと保有をレバレッジするときの借入額（元本×(レバ-1)）。レバ1倍なら0＝現物。
+        let holdBorrowed = initialCapital * (lev - 1)
+
+        var overnightEquity = initialCapital  // 戦略の評価額（コスト前・自己資金ベース）
         var cumulativeInterest = 0.0          // 累積の信用金利
 
         // 1点目（取引前。初期投資額からスタート）
@@ -455,21 +481,50 @@ extension OvernightWinRateResult {
             OvernightEquityPoint(date: startDate, overnight: initialCapital, overnightNet: initialCapital, buyAndHold: initialCapital)
         ]
 
+        var ruined = false      // 戦略が追証・ロスカット（評価額が0以下）で再起不能になったか
+        var holdRuined = false  // ずっと保有（レバあり）が再起不能になったか
         for t in trades {
+            // ずっと保有の評価額（レバ適用・借入金利・ロスカット）。
+            //   評価額 = 建玉時価(株数×レバ) − 借入 − 借入への保有日数ぶんの金利
+            //   レバ1倍: 借入0・金利0 → 時価そのまま（＝従来の現物ベンチマーク）
+            let buyAndHoldEquity: Double
+            if holdRuined {
+                buyAndHoldEquity = 0
+            } else {
+                let daysHeldTotal = max(0, calendar.dateComponents([.day], from: startDate, to: t.sellDate).day ?? 0)
+                let holdInterest = holdBorrowed * annualInterestRate * Double(daysHeldTotal) / 365.0
+                let eq = Double(t.sellClose) * shares * lev - holdBorrowed - holdInterest
+                if eq <= 0 {
+                    holdRuined = true   // 保有中に元本を割り込んだ＝ロスカットで退場
+                    buyAndHoldEquity = 0
+                } else {
+                    buyAndHoldEquity = eq
+                }
+            }
+
+            // すでに戦略が再起不能なら以降は取引しない（評価額0のまま推移）
+            if ruined {
+                equityCurve.append(
+                    OvernightEquityPoint(date: t.sellDate, overnight: 0, overnightNet: 0, buyAndHold: buyAndHoldEquity)
+                )
+                continue
+            }
+
             let buy = t.buy
             let sell = t.sell
 
             let heldShares: Double
             if compounding {
+                // 自己資金 × レバレッジ で買える整数単位ぶん建てる
                 let unitCost = Double(buy) * Double(lotSize)            // 1単位（lotSize株）の金額
                 if overnightEquity > 0 && unitCost > 0 {
-                    let lots = max(1, (overnightEquity / unitCost).rounded(.down))
+                    let lots = max(1, (overnightEquity * lev / unitCost).rounded(.down))
                     heldShares = lots * Double(lotSize)
                 } else {
                     heldShares = 0
                 }
             } else {
-                heldShares = shares
+                heldShares = shares * lev
             }
 
             // 信用金利: 実際に建てた金額に対し、持ち越した日数ぶん課金（日計り=0日なので発生しない）
@@ -479,11 +534,21 @@ extension OvernightWinRateResult {
             // 評価額の更新（複利=損益を再投資して建玉が育つ / 単利=100株固定の損益をキャッシュ加算）
             overnightEquity += heldShares * Double(sell - buy)
 
+            // レバレッジで逆行し、金利控除後の評価額が0以下になったら再起不能（追証・ロスカット）。
+            // 現実には強制決済＝退場なので、評価額を0に固定し以降は取引しない。
+            if overnightEquity - cumulativeInterest <= 0 {
+                ruined = true
+                overnightEquity = 0
+                equityCurve.append(
+                    OvernightEquityPoint(date: t.sellDate, overnight: 0, overnightNet: 0, buyAndHold: buyAndHoldEquity)
+                )
+                continue
+            }
+
             let afterInterest = overnightEquity - cumulativeInterest
             let netProfit = afterInterest - initialCapital
             let overnightNet = netProfit > 0 ? initialCapital + netProfit * (1 - taxRate) : afterInterest
 
-            let buyAndHoldEquity = Double(t.sellClose) * shares
             equityCurve.append(
                 OvernightEquityPoint(date: t.sellDate, overnight: overnightEquity, overnightNet: overnightNet, buyAndHold: buyAndHoldEquity)
             )
@@ -538,7 +603,8 @@ extension OvernightWinRateResult {
             initialCapital: initialCapital,
             shares: shares,
             compounding: isCompounding,
-            lotSize: lotSize
+            lotSize: lotSize,
+            leverage: leverage
         )
         let finalEquity = equity.last?.overnight ?? initialCapital
         let n = filtered.count
@@ -567,8 +633,10 @@ extension OvernightWinRateResult {
             initialCapital: initialCapital,
             shares: shares,
             compounding: isCompounding,
-            lotSize: lotSize
+            lotSize: lotSize,
+            leverage: leverage
         )
+        let holdRuinDate = equity.dropFirst().first(where: { $0.buyAndHold <= 0 })?.date
         return Self.buildPeriodPerformance(
             bars: bars,
             trades: filtered,
@@ -576,7 +644,9 @@ extension OvernightWinRateResult {
             initialCapital: initialCapital,
             shares: shares,
             calendar: calendar,
-            breakdown: breakdown
+            breakdown: breakdown,
+            leverage: leverage,
+            holdRuinDate: holdRuinDate
         )
     }
 
@@ -584,7 +654,8 @@ extension OvernightWinRateResult {
     /// トレードは「買った日（エントリー日）」の属する期間に計上する（曜日別集計と基準をそろえる）。
     /// - トレード回数・勝ち・戦略損益は、そのトレードを「買った日」の期間へ
     /// - 戦略損益は資産推移カーブの差分（＝各トレードの正確な損益。複利・単利どちらにも追従）
-    /// - 保有損益は各期間の「最初の終値→最後の終値」
+    /// - 保有損益は各期間の「最初の終値→最後の終値」×レバレッジ（金利控除前の概算）。
+    ///   保有がロスカット（holdRuinDate）した以降の期間は0にする。
     private static func buildPeriodPerformance(
         bars: [(date: Date, open: Float, close: Float)],
         trades: [(buy: Float, sell: Float, buyDate: Date, sellDate: Date, sellClose: Float, daysHeld: Int)],
@@ -592,12 +663,16 @@ extension OvernightWinRateResult {
         initialCapital: Double,
         shares: Double,
         calendar: Calendar,
-        breakdown: WinRateBreakdown
+        breakdown: WinRateBreakdown,
+        leverage: Double = 1.0,
+        holdRuinDate: Date? = nil
     ) -> [OvernightPeriodPerformance] {
+        let lev = max(1.0, leverage)
         // 期間バケットを作る（bars は日付昇順なので、初出順 = 時系列順）
         // profitSum=そのバケットのトレード損益合計 / endNet=バケット内最後のトレード後の手取り評価額
+        // firstDate=バケット最初の日付（保有ロスカット後の期間を0にする判定に使う）
         // buyPrice/sellPrice=バケット最初の買値・最後の売値（日単位=1トレードのとき、その日の売買値になる）
-        var buckets: [String: (label: String, trades: Int, wins: Int, profitSum: Double, endNet: Double?, firstClose: Float, lastClose: Float, buyPrice: Float?, sellPrice: Float?)] = [:]
+        var buckets: [String: (label: String, trades: Int, wins: Int, profitSum: Double, endNet: Double?, firstDate: Date, firstClose: Float, lastClose: Float, buyPrice: Float?, sellPrice: Float?)] = [:]
         var order: [String] = []
         for bar in bars {
             let k = breakdown.key(for: bar.date, calendar: calendar)
@@ -605,7 +680,7 @@ extension OvernightWinRateResult {
                 e.lastClose = bar.close
                 buckets[k] = e
             } else {
-                buckets[k] = (label: breakdown.label(for: bar.date, calendar: calendar), trades: 0, wins: 0, profitSum: 0, endNet: nil, firstClose: bar.close, lastClose: bar.close, buyPrice: nil, sellPrice: nil)
+                buckets[k] = (label: breakdown.label(for: bar.date, calendar: calendar), trades: 0, wins: 0, profitSum: 0, endNet: nil, firstDate: bar.date, firstClose: bar.close, lastClose: bar.close, buyPrice: nil, sellPrice: nil)
                 order.append(k)
             }
         }
@@ -635,7 +710,10 @@ extension OvernightWinRateResult {
             let overnightProfit = e.profitSum
             previousEndEquity = startEquity + overnightProfit
             if let en = e.endNet { previousEndNetEquity = en }
-            let buyAndHoldProfit = Double(e.lastClose - e.firstClose) * shares
+            // ずっと保有（レバ適用・金利控除前の概算）。保有がロスカットした以降の期間は退場済みなので0。
+            let holdOut = holdRuinDate.map { e.firstDate > $0 } ?? false
+            let buyAndHoldProfit = holdOut ? 0 : Double(e.lastClose - e.firstClose) * shares * lev
+            let buyAndHoldProfitPercent = holdOut ? 0 : (e.firstClose != 0 ? Double(e.lastClose - e.firstClose) / Double(e.firstClose) * 100 * lev : 0)
             performance.append(
                 OvernightPeriodPerformance(
                     id: k,
@@ -646,7 +724,7 @@ extension OvernightWinRateResult {
                     overnightProfit: overnightProfit,
                     buyAndHoldProfit: buyAndHoldProfit,
                     overnightProfitPercent: startEquity != 0 ? overnightProfit / startEquity * 100 : 0,
-                    buyAndHoldProfitPercent: e.firstClose != 0 ? Double(e.lastClose - e.firstClose) / Double(e.firstClose) * 100 : 0,
+                    buyAndHoldProfitPercent: buyAndHoldProfitPercent,
                     buyPrice: e.buyPrice,
                     sellPrice: e.sellPrice
                 )
@@ -667,6 +745,8 @@ final class OvernightWinRateViewModel: ObservableObject {
     @Published var lotSize = 100
     /// 指定元本（円）。nil のときは「最初の終値で100株」を元本とする
     @Published var principal: Double?
+    /// 信用レバレッジ倍率（1=現物相当 / 2 / 3）。建玉を倍にして損益・金利を膨らませる
+    @Published var leverage = 1
 
     /// 検証する売買戦略（引→翌寄 / 寄→引 / 前引→後場寄）
     @Published var strategy: WinRateStrategy
@@ -729,7 +809,7 @@ final class OvernightWinRateViewModel: ObservableObject {
         case .success(let candles):
             lastCandles = candles
             lastCode = trimmed
-            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal) else {
+            guard let made = OvernightWinRateResult.make(code: trimmed, candles: candles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal, leverage: Double(leverage)) else {
                 errorMessage = strategy.requiresIntradayData
                     ? "データが不足しています。日中足は直近約60日ぶんのみ取得できます。銘柄コードと期間をご確認ください。"
                     : "データが不足しています。銘柄コードと期間をご確認ください。"
@@ -748,7 +828,7 @@ final class OvernightWinRateViewModel: ObservableObject {
     /// 複利/単利・売買単位の切り替え時に、取得済みデータから再計算する（通信なし）
     func recompute() {
         guard !lastCandles.isEmpty else { return }
-        result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal)
+        result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal, leverage: Double(leverage))
     }
 }
 
@@ -904,6 +984,22 @@ struct OvernightWinRateScreen: View {
                             }
                         }
 
+                        // 信用レバレッジ（建玉を倍にして損益・金利を膨らませる。取得済みデータから即再計算）
+                        VStack(alignment: .leading, spacing: 4) {
+                            Picker("レバレッジ", selection: $viewModel.leverage) {
+                                Text("レバなし").tag(1)
+                                Text("×2").tag(2)
+                                Text("×3").tag(3)
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: viewModel.leverage) { _, _ in
+                                viewModel.recompute()
+                            }
+                            Text("自己資金（元本）はそのままに、建玉を倍にした信用取引のリターン。損失・信用金利も同じ倍率で膨らみます。比較用の「ずっと保有」も同倍率でレバをかけます（保有ぶんの金利あり）。逆行が大きいと評価額が0になり再起不能（追証・ロスカット）になります（×2で約-50%、×3で約-33%の逆行が目安）。")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+
                         Button(action: {
                             Task {
                                 isFocused = false
@@ -1038,6 +1134,14 @@ struct OvernightWinRateResultCard: View {
                     .foregroundColor(.orange)
             }
 
+            // レバレッジで評価額が0になった（追証・ロスカット＝再起不能）場合の警告
+            if let ruin = result.ruinDate {
+                ruinBanner(title: "\(result.strategy.shortLabel)が再起不能", date: ruin)
+            }
+            if let ruin = result.buyAndHoldRuinDate {
+                ruinBanner(title: "ずっと保有が再起不能", date: ruin)
+            }
+
             Divider()
 
             statRow(label: "トレード回数", value: "\(summary.totalTrades) 回")
@@ -1048,12 +1152,12 @@ struct OvernightWinRateResultCard: View {
                 color: summary.averageReturn >= 0 ? .red : .blue
             )
             statRow(
-                label: result.isCompounding ? "累積リターン（複利/\(result.lotSize)株単位）" : "累積リターン（単利・100株固定）",
+                label: (result.isCompounding ? "累積リターン（複利/\(result.lotSize)株単位" : "累積リターン（単利・100株固定") + leverageSuffix + "）",
                 value: String(format: "%+.2f%%", summary.cumulativeReturn),
                 color: summary.cumulativeReturn >= 0 ? .red : .blue
             )
             statRow(
-                label: "ずっと保有した場合の上昇率",
+                label: isLeveraged ? "ずっと保有のリターン（レバ×\(Int(result.leverage))）" : "ずっと保有した場合の上昇率",
                 value: String(format: "%+.2f%%", result.buyAndHoldReturn),
                 color: result.buyAndHoldReturn >= 0 ? .red : .blue
             )
@@ -1089,11 +1193,41 @@ struct OvernightWinRateResultCard: View {
     /// 建玉株数（単利・ずっと保有で使う固定株数）を整数表記した文字列
     private var sharesText: String { "\(Int(result.shares))" }
 
+    /// レバレッジをかけているか（1倍超）
+    private var isLeveraged: Bool { result.leverage > 1.0 }
+
+    /// ラベル末尾に付けるレバレッジ表記（×2 / ×3。1倍のときは空）
+    private var leverageSuffix: String { isLeveraged ? "・レバ×\(Int(result.leverage))" : "" }
+
     private var overnightLabel: String {
-        result.isCompounding ? "\(result.strategy.shortLabel)（複利/\(result.lotSize)株単位）" : "\(result.strategy.shortLabel)（単利・\(sharesText)株）"
+        let base = result.isCompounding ? "\(result.strategy.shortLabel)（複利/\(result.lotSize)株単位" : "\(result.strategy.shortLabel)（単利・\(sharesText)株"
+        return base + leverageSuffix + "）"
     }
     private static let overnightNetLabel = "税・金利控除後（手取り）"
-    private var buyAndHoldLabel: String { "ずっと保有（\(sharesText)株）" }
+    private var buyAndHoldLabel: String { "ずっと保有（\(sharesText)株\(leverageSuffix)）" }
+
+    /// レバレッジで評価額が0になった（追証・ロスカット＝再起不能）ことを知らせる赤バナー
+    @ViewBuilder
+    private func ruinBanner(title: String, date: Date) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.red)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(title)（\(Self.dateText(date))）")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.red)
+                Text("レバ×\(Int(result.leverage))の逆行で自己資金（元本）を全て失いました。実際の信用取引では追証・ロスカットで強制決済＝退場となり、以降のリターンは得られません（この日以降は取引停止＝評価額0として計算しています）。")
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.red.opacity(0.12))
+        )
+    }
 
     /// 初期投資額をそろえた各戦略の資産推移チャート
     @ViewBuilder
@@ -1352,7 +1486,7 @@ struct OvernightWinRateResultCard: View {
         let list = truncated ? Array(full.suffix(cap)) : full
 
         VStack(alignment: .leading, spacing: 8) {
-            Text(result.isCompounding ? "期間ごとの成績（複利/\(result.lotSize)株単位 / 保有=\(sharesText)株）" : "期間ごとの成績（\(sharesText)株）")
+            Text((result.isCompounding ? "期間ごとの成績（複利/\(result.lotSize)株単位 / 保有=\(sharesText)株" : "期間ごとの成績（\(sharesText)株") + leverageSuffix + "）")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
@@ -1385,6 +1519,11 @@ struct OvernightWinRateResultCard: View {
                 Text("※ 件数が多いため直近\(cap)件のみ表示")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
+            }
+            if isLeveraged {
+                Text("※ レバ×\(Int(result.leverage))で計算。期間別の「ずっと保有」は金利控除前のレバ換算（概算）")
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange)
             }
 
             // ヘッダー
