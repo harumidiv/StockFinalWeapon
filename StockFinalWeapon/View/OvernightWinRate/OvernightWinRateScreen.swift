@@ -72,7 +72,11 @@ enum WinRateBreakdown: String, CaseIterable, Identifiable {
             let s = calendar.dateComponents([.month, .day], from: start)
             return String(format: "%d/%d〜", s.month ?? 0, s.day ?? 0)
         case .day:
-            return String(format: "%02d/%02d/%02d", (c.year ?? 0) % 100, c.month ?? 0, c.day ?? 0)
+            // 曜日を漢字1文字（月火水木金土日）で付ける
+            let weekdayNames = ["日", "月", "火", "水", "木", "金", "土"] // Calendar.weekday: 1=日 … 7=土
+            let wd = calendar.component(.weekday, from: date)
+            let w = weekdayNames[(wd - 1 + 7) % 7]
+            return String(format: "%02d/%02d/%02d(%@)", (c.year ?? 0) % 100, c.month ?? 0, c.day ?? 0, w)
         }
     }
 }
@@ -237,6 +241,13 @@ struct OvernightWinRateResult {
     let shares: Double
 }
 
+struct CompareItem: Identifiable {
+    let id = UUID()
+    let code: String
+    let result: OvernightWinRateResult?
+    let error: String?
+}
+
 extension OvernightWinRateResult {
     /// 取得したローソク足から、指定した戦略（引→翌寄 / 寄→引）の集計結果を作る。
     /// 有効データが2本未満の場合は nil を返す。
@@ -249,14 +260,19 @@ extension OvernightWinRateResult {
     ///                単利の固定株数・複利の初期資金・ずっと保有の株数すべてに反映する。
     ///   - leverage: 信用取引のレバレッジ倍率（1.0〜3.0）。建玉を倍にして損益・金利を膨らませる。
     ///               ベンチマークの「ずっと保有」には掛けない。
-    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int, principal: Double? = nil, leverage: Double = 1.0) -> OvernightWinRateResult? {
-        // 有効な始値・終値のみを日付昇順に整理
+    static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int, principal: Double? = nil, leverage: Double = 1.0, restrictStart: Date? = nil, restrictEnd: Date? = nil) -> OvernightWinRateResult? {
+        // 有効な始値・終値のみを日付昇順に整理し、必要なら期間を制限する
         let bars = candles
             .compactMap { c -> (date: Date, open: Float, close: Float)? in
                 guard let d = c.date, let o = c.open, let cl = c.close, o > 0, cl > 0 else { return nil }
                 return (d, o, cl)
             }
             .sorted { $0.date < $1.date }
+            .filter { bar in
+                if let rs = restrictStart, bar.date < rs { return false }
+                if let re = restrictEnd, bar.date > re { return false }
+                return true
+            }
 
         guard bars.count >= 2 else { return nil }
 
@@ -830,12 +846,92 @@ final class OvernightWinRateViewModel: ObservableObject {
         guard !lastCandles.isEmpty else { return }
         result = OvernightWinRateResult.make(code: lastCode, candles: lastCandles, strategy: strategy, compounding: isCompounding, lotSize: lotSize, principal: principal, leverage: Double(leverage))
     }
+
+    // MARK: - 複数銘柄比較
+
+    @Published var compareItems: [CompareItem] = []
+    @Published var isCompareLoading = false
+
+    func calculateCompare(codes: [String], period: WinRatePeriod) async {
+        let end = Date()
+        guard let start = Calendar.current.date(byAdding: .day, value: -period.days, to: end) else { return }
+        await calculateCompare(codes: codes, start: start, end: end)
+    }
+
+    func calculateCompare(codes: [String], start: Date, end: Date) async {
+        isCompareLoading = true
+        compareItems = []
+        defer { isCompareLoading = false }
+
+        let service = YahooYFinanceAPIService()
+
+        // Step 1: 全銘柄のローソク足を取得
+        var fetched: [(code: String, candles: [MyStockChartData]?, error: String?)] = []
+        for code in codes {
+            var effectiveStart = start
+            if strategy.requiresIntradayData,
+               let minStart = Calendar.current.date(byAdding: .day, value: -Self.intradayLookbackLimitDays, to: end),
+               effectiveStart < minStart {
+                effectiveStart = minStart
+            }
+            let apiResult = strategy.requiresIntradayData
+                ? await service.fetchLunchBreakBars(code: code, startDate: effectiveStart, endDate: end)
+                : await service.fetchStockChartData(code: code, startDate: effectiveStart, endDate: end)
+            switch apiResult {
+            case .success(let candles): fetched.append((code, candles, nil))
+            case .failure: fetched.append((code, nil, "取得失敗"))
+            }
+        }
+
+        // Step 2: 各銘柄の実際の開始日・終了日を調べ、全銘柄共通の交差期間を求める
+        var validEntries: [(code: String, candles: [MyStockChartData], startDate: Date, endDate: Date)] = []
+        for item in fetched {
+            guard let candles = item.candles,
+                  let r = OvernightWinRateResult.make(
+                      code: item.code, candles: candles, strategy: strategy,
+                      compounding: isCompounding, lotSize: lotSize,
+                      principal: principal, leverage: Double(leverage)),
+                  let sd = r.startDate, let ed = r.endDate else { continue }
+            validEntries.append((item.code, candles, sd, ed))
+        }
+
+        // 交差開始日 = 最も遅い開始日、交差終了日 = 最も早い終了日
+        let alignStart = validEntries.map(\.startDate).max()
+        let alignEnd   = validEntries.map(\.endDate).min()
+        let shouldAlign = validEntries.count > 1
+
+        // Step 3: 交差期間を make() 内部のフィルタとして渡し再計算、結果を反映
+        let rs: Date? = (shouldAlign && alignStart != nil && alignEnd != nil && alignStart! < alignEnd!) ? alignStart : nil
+        let re: Date? = rs != nil ? alignEnd : nil
+        for item in fetched {
+            let compItem: CompareItem
+            if let candles = item.candles {
+                let r = OvernightWinRateResult.make(
+                    code: item.code, candles: candles, strategy: strategy,
+                    compounding: isCompounding, lotSize: lotSize,
+                    principal: principal, leverage: Double(leverage),
+                    restrictStart: rs, restrictEnd: re
+                )
+                compItem = CompareItem(code: item.code, result: r, error: r == nil ? "データ不足" : nil)
+            } else {
+                compItem = CompareItem(code: item.code, result: nil, error: item.error)
+            }
+            compareItems.append(compItem)
+        }
+    }
 }
 
 /// 期間の指定方法
 enum WinRateRangeMode: String, CaseIterable, Identifiable {
     case preset = "期間プリセット"
     case custom = "日付指定"
+    var id: Self { self }
+}
+
+/// 単一銘柄検証 or 複数銘柄比較
+enum WinRateInputMode: String, CaseIterable, Identifiable {
+    case single = "1銘柄"
+    case compare = "複数比較"
     var id: Self { self }
 }
 
@@ -849,6 +945,8 @@ struct OvernightWinRateScreen: View {
     @State private var rangeMode: WinRateRangeMode = .preset
     @State private var startDate: Date = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
     @State private var endDate: Date = Date()
+    @State private var inputMode: WinRateInputMode = .single
+    @State private var compareCodesText: String = ""
     @FocusState private var isFocused: Bool
 
     init(strategy: WinRateStrategy = .overnight, selectableStrategies: [WinRateStrategy]? = nil) {
@@ -874,6 +972,28 @@ struct OvernightWinRateScreen: View {
             await viewModel.calculate(code: code, period: period)
         case .custom:
             await viewModel.calculate(code: code, start: startDate, end: endDate)
+        }
+    }
+
+    /// compareCodesText をパースして最大10銘柄のリストにする
+    private var parsedCompareCodes: [String] {
+        compareCodesText
+            .replacingOccurrences(of: ",", with: " ")
+            .split(separator: " ")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .prefix(10)
+            .map { String($0) }
+    }
+
+    private func runCompareCalculation() async {
+        isFocused = false
+        viewModel.principal = parsedPrincipal
+        switch rangeMode {
+        case .preset:
+            await viewModel.calculateCompare(codes: parsedCompareCodes, period: period)
+        case .custom:
+            await viewModel.calculateCompare(codes: parsedCompareCodes, start: startDate, end: endDate)
         }
     }
 
@@ -917,12 +1037,32 @@ struct OvernightWinRateScreen: View {
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
 
+                    Picker("入力モード", selection: $inputMode) {
+                        ForEach(WinRateInputMode.allCases) { m in
+                            Text(m.rawValue).tag(m)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: inputMode) { _, _ in isFocused = false }
+
                     // 入力フォーム
                     VStack(alignment: .leading, spacing: 12) {
-                        TextField("銘柄コード (例: 7203)", text: $code)
-                            .focused($isFocused)
-                            .keyboardType(.numbersAndPunctuation)
-                            .textFieldStyle(.roundedBorder)
+                        if inputMode == .single {
+                            TextField("銘柄コード (例: 7203)", text: $code)
+                                .focused($isFocused)
+                                .keyboardType(.numbersAndPunctuation)
+                                .textFieldStyle(.roundedBorder)
+                        } else {
+                            VStack(alignment: .leading, spacing: 4) {
+                                TextField("銘柄コード (例: 7203, 9984, 6758)", text: $compareCodesText)
+                                    .focused($isFocused)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .textFieldStyle(.roundedBorder)
+                                Text("カンマまたはスペース区切りで入力（最大10銘柄）")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
 
                         VStack(alignment: .leading, spacing: 4) {
                             TextField("元本 (円・未入力なら100株)", text: $principalText)
@@ -1002,8 +1142,12 @@ struct OvernightWinRateScreen: View {
 
                         Button(action: {
                             Task {
-                                isFocused = false
-                                await runCalculation()
+                                if inputMode == .single {
+                                    isFocused = false
+                                    await runCalculation()
+                                } else {
+                                    await runCompareCalculation()
+                                }
                             }
                         }) {
                             Label("勝率を計算", systemImage: "chart.line.uptrend.xyaxis")
@@ -1011,22 +1155,44 @@ struct OvernightWinRateScreen: View {
                                 .padding(.vertical, 6)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isLoading)
+                        .disabled(
+                            (inputMode == .single
+                                ? code.trimmingCharacters(in: .whitespaces).isEmpty
+                                : parsedCompareCodes.isEmpty)
+                            || viewModel.isLoading || viewModel.isCompareLoading
+                        )
                     }
 
-                    if viewModel.isLoading {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
+                    if inputMode == .single {
+                        if viewModel.isLoading {
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                Spacer()
+                            }
+                            .padding(.top, 20)
+                        } else if let message = viewModel.errorMessage {
+                            Text(message)
+                                .font(.system(size: 14))
+                                .foregroundColor(.red)
+                        } else if let result = viewModel.result {
+                            OvernightWinRateResultCard(result: result)
                         }
-                        .padding(.top, 20)
-                    } else if let message = viewModel.errorMessage {
-                        Text(message)
-                            .font(.system(size: 14))
-                            .foregroundColor(.red)
-                    } else if let result = viewModel.result {
-                        OvernightWinRateResultCard(result: result)
+                    } else {
+                        if viewModel.isCompareLoading && viewModel.compareItems.isEmpty {
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                Spacer()
+                            }
+                            .padding(.top, 20)
+                        } else if !viewModel.compareItems.isEmpty {
+                            OvernightCompareTable(
+                                items: viewModel.compareItems,
+                                strategy: viewModel.strategy,
+                                isLoading: viewModel.isCompareLoading
+                            )
+                        }
                     }
 
                     Spacer()
@@ -1051,6 +1217,119 @@ struct OvernightWinRateScreen: View {
                     Spacer()
                     Button("閉じる") { isFocused = false }
                 }
+            }
+        }
+    }
+}
+
+/// 複数銘柄のパフォーマンスを横並びで比較するテーブル
+struct OvernightCompareTable: View {
+    let items: [CompareItem]
+    let strategy: WinRateStrategy
+    let isLoading: Bool
+
+    /// 全成功銘柄に共通する期間（startDate の最大値 〜 endDate の最小値）
+    private var commonDateRange: (start: Date, end: Date)? {
+        let results = items.compactMap(\.result)
+        guard results.count > 1,
+              let start = results.compactMap(\.startDate).max(),
+              let end   = results.compactMap(\.endDate).min(),
+              start < end else { return nil }
+        return (start, end)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("複数銘柄比較")
+                    .font(.system(size: 15, weight: .bold))
+                Spacer()
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+            }
+
+            if let dateRange = commonDateRange {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 10))
+                    Text("共通期間: \(OvernightWinRateResultCard.dateText(dateRange.start)) 〜 \(OvernightWinRateResultCard.dateText(dateRange.end))  /  \(strategy.shortLabel)")
+                }
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            HStack {
+                Text("銘柄").frame(width: 52, alignment: .leading)
+                Text("回数").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("平均損益率").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("累積").frame(maxWidth: .infinity, alignment: .trailing)
+                Text("保有").frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+
+            ForEach(items) { item in
+                compareRow(item: item)
+                Divider()
+            }
+
+            Text("累積=戦略の累積リターン / 保有=ずっと保有した場合の上昇率")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func compareRow(item: CompareItem) -> some View {
+        if let result = item.result {
+            HStack {
+                Text(item.code)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(width: 52, alignment: .leading)
+                Text("\(result.totalTrades)")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .foregroundColor(.secondary)
+                Text(String(format: "%.0f%%", result.winRate))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .foregroundColor(result.winRate >= 50 ? .red : .blue)
+                Text(String(format: "%+.3f%%", result.averageReturn))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .foregroundColor(result.averageReturn >= 0 ? .red : .blue)
+                Text(String(format: "%+.1f%%", result.cumulativeReturn))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .foregroundColor(result.cumulativeReturn >= 0 ? .red : .blue)
+                Text(String(format: "%+.1f%%", result.buyAndHoldReturn))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .foregroundColor(result.buyAndHoldReturn >= 0 ? .red : .blue)
+            }
+            .font(.system(size: 12, design: .monospaced))
+        } else if let error = item.error {
+            HStack {
+                Text(item.code)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(width: 52, alignment: .leading)
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundColor(.red)
+                Spacer()
+            }
+        } else {
+            HStack {
+                Text(item.code)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(width: 52, alignment: .leading)
+                ProgressView()
+                    .frame(maxWidth: .infinity)
             }
         }
     }
