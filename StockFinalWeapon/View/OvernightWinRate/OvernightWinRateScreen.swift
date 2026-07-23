@@ -1094,6 +1094,11 @@ struct OvernightWinRateScreen: View {
                                 }
                             }
                             .pickerStyle(.segmented)
+                            .onChange(of: period) { _, _ in
+                                guard inputMode == .single, viewModel.result != nil,
+                                      !code.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                                Task { await runCalculation() }
+                            }
                         case .custom:
                             VStack(alignment: .leading, spacing: 8) {
                                 DatePicker("開始日", selection: $startDate, in: ...endDate, displayedComponents: .date)
