@@ -14,7 +14,7 @@ class SNDKDiffViewModel: ObservableObject {
     @Published var sndkMarketCapThousandUSD: Double?
     @Published var kioxia: KioxiaData?
     @Published var sndkRSI: Double?   // SNDK（サンディスク）の日足RSI(14)
-    @Published var kioxiaRSI: Double? // キオクシア(285A)の日足RSI(14)
+    @Published var kioxiaRSI: Double? // キオクシア(285A)の日足RSI(14) 
     @Published var isLoading = false
     @Published var errorMessage: String?
 
