@@ -762,7 +762,10 @@ struct RSIChartScreen: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("保有中（勝率には未算入）")
                             .font(.subheadline.weight(.semibold))
-                        Text("\(position.buyDate, format: .dateTime.year().month().day()) に \(priceText(position.buyPrice)) で買い ・ 評価損益 \(signedPercentageText(position.returnPercentage))")
+                        Text("購入: \(position.buyDate, format: .dateTime.year().month().day()) ・ \(priceText(position.buyPrice)) ・ RSI \(position.buyRSI, format: .number.precision(.fractionLength(1)))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("最新評価: \(position.latestDate, format: .dateTime.year().month().day()) ・ \(priceText(position.latestPrice)) ・ 損益 \(signedPercentageText(position.returnPercentage))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -772,18 +775,14 @@ struct RSIChartScreen: View {
             }
 
             if !result.trades.isEmpty {
-                DisclosureGroup("取引履歴（直近最大10件）") {
-                    VStack(spacing: 0) {
-                        ForEach(Array(result.trades.suffix(10).reversed())) { trade in
-                            tradeRow(trade)
-                            if trade.id != result.trades.suffix(10).first?.id {
-                                Divider()
-                            }
-                        }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("取引明細（全\(result.trades.count)件）")
+                        .font(.subheadline.weight(.semibold))
+
+                    ForEach(Array(result.trades.reversed())) { trade in
+                        tradeRow(trade)
                     }
-                    .padding(.top, 6)
                 }
-                .font(.subheadline)
             } else {
                 Text("条件を満たす決済済み取引はありません。")
                     .font(.footnote)
@@ -821,20 +820,68 @@ struct RSIChartScreen: View {
     }
 
     private func tradeRow(_ trade: RSIBacktester.Trade) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(trade.buyDate, format: .dateTime.year().month().day()) → \(trade.sellDate, format: .dateTime.year().month().day())")
+        VStack(spacing: 10) {
+            tradeExecutionRow(
+                title: "購入",
+                date: trade.buyDate,
+                price: trade.buyPrice,
+                rsi: trade.buyRSI,
+                color: .blue
+            )
+
+            tradeExecutionRow(
+                title: "売却",
+                date: trade.sellDate,
+                price: trade.sellPrice,
+                rsi: trade.sellRSI,
+                color: .red
+            )
+
+            Divider()
+
+            HStack {
+                Text("取引損益")
                     .font(.caption)
-                Text("\(priceText(trade.buyPrice)) → \(priceText(trade.sellPrice))")
-                    .font(.caption2)
                     .foregroundStyle(.secondary)
+                Spacer()
+                Text(signedPercentageText(trade.returnPercentage))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(profitColor(trade.returnPercentage))
             }
-            Spacer()
-            Text(signedPercentageText(trade.returnPercentage))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(profitColor(trade.returnPercentage))
         }
-        .padding(.vertical, 7)
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func tradeExecutionRow(
+        title: String,
+        date: Date,
+        price: Double,
+        rsi: Double,
+        color: Color
+    ) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+                .frame(width: 36)
+                .padding(.vertical, 5)
+                .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(date, format: .dateTime.year().month().day())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("\(title)価格  \(priceText(price))")
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            Spacer(minLength: 6)
+
+            Text("RSI \(rsi, format: .number.precision(.fractionLength(1)))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func loadStock() async {
