@@ -9,6 +9,7 @@ import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
     case winRate
+    case rsi
     case intradayWinRate
     case sndkDiff
     case momentam
@@ -29,6 +30,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .momentam: return "モメンタム"
         case .sndkDiff: return "SNDK差分"
         case .winRate: return "勝率"
+        case .rsi: return "RSI"
         case .intradayWinRate: return "デイトレ"
         case .mypage: return "マイページ"
         }
@@ -43,6 +45,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .momentam: return "bolt.fill"
         case .sndkDiff: return "arrow.left.arrow.right"
         case .winRate: return "percent"
+        case .rsi: return "chart.xyaxis.line"
         case .intradayWinRate: return "sun.max.fill"
         case .mypage: return "person.fill"
         }
@@ -99,6 +102,12 @@ struct HomeTabView: View {
                             Label(AppTab.winRate.title, systemImage: AppTab.winRate.icon)
                         }
                         .tag(AppTab.winRate)
+                case .rsi:
+                    RSIChartScreen()
+                        .tabItem {
+                            Label(AppTab.rsi.title, systemImage: AppTab.rsi.icon)
+                        }
+                        .tag(AppTab.rsi)
                 case .intradayWinRate:
                     OvernightWinRateScreen(strategy: .intraday, selectableStrategies: [.intraday, .lunchBreak])
                         .tabItem {
