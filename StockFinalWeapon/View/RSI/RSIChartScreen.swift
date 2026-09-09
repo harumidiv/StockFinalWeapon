@@ -57,6 +57,22 @@ private enum RSIBacktestRange: Int, CaseIterable, Identifiable {
     var title: String { "\(rawValue)年" }
 }
 
+private enum RSISection: String, CaseIterable, Identifiable {
+    case chart
+    case backtest
+    case targetPrice
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .chart: return "チャート"
+        case .backtest: return "バックテスト"
+        case .targetPrice: return "翌日終値"
+        }
+    }
+}
+
 private enum RSIInputField: Hashable {
     case stockCode
     case buyRSI
@@ -265,6 +281,7 @@ private final class RSIChartViewModel: ObservableObject {
 struct RSIChartScreen: View {
     @StateObject private var viewModel = RSIChartViewModel()
     @State private var stockCode = "1570"
+    @State private var selectedSection: RSISection = .chart
     @State private var targetLine: RSILine = .short
     @State private var targetRSIText = "30"
     @State private var targetPrice: Double?
@@ -314,6 +331,17 @@ struct RSIChartScreen: View {
         selectedShortPoint?.close ?? viewModel.latestClose
     }
 
+    private var visibleInputFields: [RSIInputField] {
+        switch selectedSection {
+        case .chart:
+            return [.stockCode]
+        case .backtest:
+            return [.stockCode, .buyRSI, .sellRSI]
+        case .targetPrice:
+            return [.stockCode, .targetRSI]
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
@@ -334,15 +362,23 @@ struct RSIChartScreen: View {
                             )
                             .padding(.vertical, 24)
                         } else if !shortChartPoints.isEmpty, !longChartPoints.isEmpty {
-                            rsiChartCard
-                            analysisMenuCard
+                            sectionPicker
+
+                            switch selectedSection {
+                            case .chart:
+                                rsiChartCard
+                            case .backtest:
+                                backtestCard
+                            case .targetPrice:
+                                targetPriceCard
+                            }
                         }
                     }
                     .padding()
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .overlay(alignment: .bottom) {
-                    keyboardToolbar(using: proxy, fields: [.stockCode])
+                    keyboardToolbar(using: proxy, fields: visibleInputFields)
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -352,6 +388,14 @@ struct RSIChartScreen: View {
             .onChange(of: targetLine) { _, _ in calculateTargetPrice() }
             .onChange(of: backtestLine) { _, _ in calculateBacktest() }
             .onChange(of: backtestRange) { _, _ in calculateBacktest() }
+            .onChange(of: selectedSection) { _, section in
+                focusedField = nil
+                if section == .backtest {
+                    calculateBacktest()
+                } else if section == .targetPrice {
+                    calculateTargetPrice()
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
                 withAnimation(.easeOut(duration: 0.2)) {
                     keyboardIsPresented = true
@@ -506,108 +550,16 @@ struct RSIChartScreen: View {
         .cardStyle()
     }
 
-    private var analysisMenuCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("詳細分析")
-                .font(.headline)
-                .padding(.bottom, 6)
-
-            NavigationLink {
-                backtestDetailScreen
-            } label: {
-                analysisMenuRow(
-                    title: "RSI売買バックテスト",
-                    description: "売買条件ごとの勝率と累積損益を検証",
-                    systemImage: "arrow.triangle.2.circlepath",
-                    color: .purple
-                )
-            }
-
-            Divider()
-                .padding(.leading, 46)
-
-            NavigationLink {
-                targetPriceDetailScreen
-            } label: {
-                analysisMenuRow(
-                    title: "指定RSIの翌日終値",
-                    description: "目標RSIに到達する株価を逆算",
-                    systemImage: "target",
-                    color: .green
-                )
+    private var sectionPicker: some View {
+        Picker("表示内容", selection: $selectedSection) {
+            ForEach(RSISection.allCases) { section in
+                Text(section.title).tag(section)
             }
         }
-        .buttonStyle(.plain)
-        .cardStyle()
-    }
-
-    private func analysisMenuRow(
-        title: String,
-        description: String,
-        systemImage: String,
-        color: Color
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.headline)
-                .foregroundStyle(color)
-                .frame(width: 34, height: 34)
-                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 8)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-        .padding(.vertical, 11)
-    }
-
-    private var backtestDetailScreen: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                backtestCard
-                    .padding()
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .overlay(alignment: .bottom) {
-                keyboardToolbar(using: proxy, fields: [.buyRSI, .sellRSI])
-            }
-        }
-        .navigationTitle("RSIバックテスト")
-        .navigationBarTitleDisplayMode(.inline)
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .onAppear {
-            calculateBacktest()
-        }
-    }
-
-    private var targetPriceDetailScreen: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                targetPriceCard
-                    .padding()
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .overlay(alignment: .bottom) {
-                keyboardToolbar(using: proxy, fields: [.targetRSI])
-            }
-        }
-        .navigationTitle("指定RSIの翌日終値")
-        .navigationBarTitleDisplayMode(.inline)
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .onAppear {
-            calculateTargetPrice()
-        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("RSIの表示内容")
+        .padding(4)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var targetPriceCard: some View {
