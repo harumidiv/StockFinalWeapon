@@ -2,7 +2,7 @@
 //  RSIChartScreen.swift
 //  StockFinalWeapon
 //
-//  入力した銘柄のRSIチャートと、指定RSIに必要な翌日終値を表示する。
+//  RSIチャート、売買バックテスト、指定RSIに必要な翌日終値を表示する。
 //
 
 import Charts
@@ -14,6 +14,7 @@ import UIKit
 private struct RSIDailyPrice: Identifiable {
     let date: Date
     let close: Double
+    let adjustedClose: Double
 
     var id: Date { date }
 }
@@ -47,23 +48,20 @@ private enum RSILine: String, CaseIterable, Identifiable {
     }
 }
 
+private enum RSIBacktestRange: Int, CaseIterable, Identifiable {
+    case oneYear = 1
+    case threeYears = 3
+    case fiveYears = 5
+
+    var id: Self { self }
+    var title: String { "\(rawValue)年" }
+}
+
 private enum RSIInputField: Hashable {
     case stockCode
+    case buyRSI
+    case sellRSI
     case targetRSI
-
-    var previous: RSIInputField? {
-        switch self {
-        case .stockCode: return nil
-        case .targetRSI: return .stockCode
-        }
-    }
-
-    var next: RSIInputField? {
-        switch self {
-        case .stockCode: return .targetRSI
-        case .targetRSI: return nil
-        }
-    }
 }
 
 private struct RSIKeyboardToolbar: View {
@@ -153,7 +151,8 @@ private final class RSIChartViewModel: ObservableObject {
         defer { isLoading = false }
 
         let end = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-        guard let start = Calendar.current.date(byAdding: .month, value: -18, to: end) else {
+        // 最大5年のバックテスト開始時点より前にも、RSI算出用の余裕を持たせる。
+        guard let start = Calendar.current.date(byAdding: .month, value: -62, to: end) else {
             errorMessage = "取得期間を計算できませんでした。"
             return
         }
@@ -172,7 +171,12 @@ private final class RSIChartViewModel: ObservableObject {
                           close > 0 else {
                         return nil
                     }
-                    return RSIDailyPrice(date: date, close: close)
+                    let adjustedClose = item.adjclose.map(Double.init) ?? close
+                    return RSIDailyPrice(
+                        date: date,
+                        close: close,
+                        adjustedClose: adjustedClose.isFinite && adjustedClose > 0 ? adjustedClose : close
+                    )
                 }
                 .sorted { $0.date < $1.date }
 
@@ -219,6 +223,33 @@ private final class RSIChartViewModel: ObservableObject {
         )
     }
 
+    func backtest(
+        line: RSILine,
+        range: RSIBacktestRange,
+        buyThreshold: Double,
+        sellThreshold: Double
+    ) -> RSIBacktester.Result? {
+        guard let latestDate,
+              let startDate = Calendar.current.date(
+                byAdding: .year,
+                value: -range.rawValue,
+                to: latestDate
+              ) else {
+            return nil
+        }
+
+        return RSIBacktester.run(
+            dates: prices.map(\.date),
+            // 長期検証で株式分割や配当により損益・RSIが歪まないよう調整後終値を使う。
+            closes: prices.map(\.adjustedClose),
+            period: line.period,
+            method: .simple,
+            buyThreshold: buyThreshold,
+            sellThreshold: sellThreshold,
+            startingAt: startDate
+        )
+    }
+
     private static func normalizedIdentifier(from input: String) -> String? {
         let trimmed = input
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -235,9 +266,15 @@ struct RSIChartScreen: View {
     @StateObject private var viewModel = RSIChartViewModel()
     @State private var stockCode = "1570"
     @State private var targetLine: RSILine = .short
-    @State private var targetRSIText = "20"
+    @State private var targetRSIText = "30"
     @State private var targetPrice: Double?
     @State private var targetErrorMessage: String?
+    @State private var backtestLine: RSILine = .short
+    @State private var backtestRange: RSIBacktestRange = .threeYears
+    @State private var buyRSIText = "30"
+    @State private var sellRSIText = "70"
+    @State private var backtestResult: RSIBacktester.Result?
+    @State private var backtestErrorMessage: String?
     @State private var keyboardIsPresented = false
     @State private var selectedChartDate: Date?
     @FocusState private var focusedField: RSIInputField?
@@ -281,10 +318,9 @@ struct RSIChartScreen: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 8) {
                         searchCard
                             .id(RSIInputField.stockCode)
-                        rsiPeriodCard
 
                         if viewModel.isLoading {
                             ProgressView("株価データを取得中…")
@@ -299,50 +335,38 @@ struct RSIChartScreen: View {
                             .padding(.vertical, 24)
                         } else if !shortChartPoints.isEmpty, !longChartPoints.isEmpty {
                             rsiChartCard
-                            targetPriceCard
-                                .id(RSIInputField.targetRSI)
+                            analysisMenuCard
                         }
                     }
                     .padding()
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .overlay(alignment: .bottom) {
-                    if keyboardIsPresented {
-                        RSIKeyboardToolbar(
-                            canGoPrevious: focusedField?.previous != nil,
-                            canGoNext: focusedField?.next != nil,
-                            onPrevious: { moveFocus(to: focusedField?.previous, using: proxy) },
-                            onNext: { moveFocus(to: focusedField?.next, using: proxy) },
-                            onDone: { focusedField = nil }
-                        )
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        keyboardIsPresented = true
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        keyboardIsPresented = false
-                    }
+                    keyboardToolbar(using: proxy, fields: [.stockCode])
                 }
             }
-            .navigationTitle("RSIチャート")
             .background(Color(.systemGroupedBackground))
             .task {
                 await loadStock()
             }
             .onChange(of: targetLine) { _, _ in calculateTargetPrice() }
+            .onChange(of: backtestLine) { _, _ in calculateBacktest() }
+            .onChange(of: backtestRange) { _, _ in calculateBacktest() }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    keyboardIsPresented = true
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    keyboardIsPresented = false
+                }
+            }
         }
     }
 
     private var searchCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("銘柄コード")
-                .font(.headline)
-
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
                 TextField("例: 7203 / AAPL", text: $stockCode)
                     .textInputAutocapitalization(.characters)
@@ -374,41 +398,12 @@ struct RSIChartScreen: View {
         .cardStyle()
     }
 
-    private var rsiPeriodCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 20) {
-                Label {
-                    Text("短期 9日")
-                } icon: {
-                    Image(systemName: "circle.fill")
-                        .foregroundStyle(.orange)
-                }
-
-                Label {
-                    Text("長期 14日")
-                } icon: {
-                    Image(systemName: "circle.fill")
-                        .foregroundStyle(.indigo)
-                }
-            }
-
-            Text("楽天証券iSPEEDの日足初期値と同じ期間で、値上がり幅・値下がり幅の単純合計から算出します。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .cardStyle()
-    }
-
     private var rsiChartCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(viewModel.loadedIdentifier)
-                    .font(.headline)
-                if let displayedDate {
-                    Text("\(selectedChartDate == nil ? "最新" : "選択日") ・ \(displayedDate, format: .dateTime.year().month().day())")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            if let displayedDate {
+                Text("\(selectedChartDate == nil ? "最新" : "選択日") ・ \(displayedDate, format: .dateTime.year().month().day())")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if let displayedClose {
@@ -511,6 +506,110 @@ struct RSIChartScreen: View {
         .cardStyle()
     }
 
+    private var analysisMenuCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("詳細分析")
+                .font(.headline)
+                .padding(.bottom, 6)
+
+            NavigationLink {
+                backtestDetailScreen
+            } label: {
+                analysisMenuRow(
+                    title: "RSI売買バックテスト",
+                    description: "売買条件ごとの勝率と累積損益を検証",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    color: .purple
+                )
+            }
+
+            Divider()
+                .padding(.leading, 46)
+
+            NavigationLink {
+                targetPriceDetailScreen
+            } label: {
+                analysisMenuRow(
+                    title: "指定RSIの翌日終値",
+                    description: "目標RSIに到達する株価を逆算",
+                    systemImage: "target",
+                    color: .green
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .cardStyle()
+    }
+
+    private func analysisMenuRow(
+        title: String,
+        description: String,
+        systemImage: String,
+        color: Color
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.headline)
+                .foregroundStyle(color)
+                .frame(width: 34, height: 34)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 11)
+    }
+
+    private var backtestDetailScreen: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                backtestCard
+                    .padding()
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .overlay(alignment: .bottom) {
+                keyboardToolbar(using: proxy, fields: [.buyRSI, .sellRSI])
+            }
+        }
+        .navigationTitle("RSIバックテスト")
+        .navigationBarTitleDisplayMode(.inline)
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .onAppear {
+            calculateBacktest()
+        }
+    }
+
+    private var targetPriceDetailScreen: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                targetPriceCard
+                    .padding()
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .overlay(alignment: .bottom) {
+                keyboardToolbar(using: proxy, fields: [.targetRSI])
+            }
+        }
+        .navigationTitle("指定RSIの翌日終値")
+        .navigationBarTitleDisplayMode(.inline)
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .onAppear {
+            calculateTargetPrice()
+        }
+    }
+
     private var targetPriceCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("指定RSIに必要な翌日終値")
@@ -528,9 +627,10 @@ struct RSIChartScreen: View {
             .pickerStyle(.segmented)
 
             HStack(spacing: 10) {
-                TextField("例: 20", text: $targetRSIText)
+                TextField("例: 30", text: $targetRSIText)
                     .keyboardType(.decimalPad)
                     .focused($focusedField, equals: .targetRSI)
+                    .id(RSIInputField.targetRSI)
                     .padding(12)
                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
                     .accessibilityLabel("目標RSI")
@@ -568,14 +668,259 @@ struct RSIChartScreen: View {
         .cardStyle()
     }
 
+    private var backtestCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("RSI売買バックテスト")
+                    .font(.headline)
+                Text("買いRSI以下で買い、売りRSI以上で売却する取引を繰り返します。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Picker("RSI期間", selection: $backtestLine) {
+                ForEach(RSILine.allCases) { line in
+                    Text(line.title).tag(line)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Picker("検証期間", selection: $backtestRange) {
+                ForEach(RSIBacktestRange.allCases) { range in
+                    Text(range.title).tag(range)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            HStack(spacing: 10) {
+                thresholdField(
+                    title: "買い（以下）",
+                    text: $buyRSIText,
+                    field: .buyRSI,
+                    color: .blue
+                )
+                thresholdField(
+                    title: "売り（以上）",
+                    text: $sellRSIText,
+                    field: .sellRSI,
+                    color: .red
+                )
+            }
+
+            Button {
+                calculateBacktest()
+                focusedField = nil
+            } label: {
+                Label("バックテストを実行", systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            if let result = backtestResult {
+                backtestResultView(result)
+            } else if let backtestErrorMessage {
+                Label(backtestErrorMessage, systemImage: "exclamationmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
+            Text("日足の調整後終値（株式分割・配当調整済み）で売買し、毎回全資金を投入した複利計算です。手数料・税金・スリッページは含みません。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .cardStyle()
+    }
+
+    private func thresholdField(
+        title: String,
+        text: Binding<String>,
+        field: RSIInputField,
+        color: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(color)
+            TextField("0〜100", text: text)
+                .keyboardType(.decimalPad)
+                .focused($focusedField, equals: field)
+                .id(field)
+                .padding(12)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityLabel("\(title)のRSI")
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func backtestResultView(_ result: RSIBacktester.Result) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+
+            Text("\(result.startDate, format: .dateTime.year().month().day()) 〜 \(result.endDate, format: .dateTime.year().month().day())")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                backtestMetric(
+                    title: "累積損益",
+                    value: signedPercentageText(result.totalReturnPercentage),
+                    color: profitColor(result.totalReturnPercentage)
+                )
+                backtestMetric(
+                    title: "勝率",
+                    value: result.winRatePercentage.map { percentageText($0) } ?? "--",
+                    color: .accentColor
+                )
+                backtestMetric(
+                    title: "決済回数",
+                    value: "\(result.trades.count)回",
+                    color: .primary
+                )
+            }
+
+            VStack(spacing: 7) {
+                backtestComparisonRow(
+                    title: "買い持ち損益",
+                    value: signedPercentageText(result.buyAndHoldReturnPercentage),
+                    color: profitColor(result.buyAndHoldReturnPercentage)
+                )
+                if result.openPosition != nil {
+                    backtestComparisonRow(
+                        title: "決済済み累積損益",
+                        value: signedPercentageText(result.realizedReturnPercentage),
+                        color: profitColor(result.realizedReturnPercentage)
+                    )
+                }
+                backtestComparisonRow(
+                    title: "1取引の平均",
+                    value: result.averageTradeReturnPercentage.map { signedPercentageText($0) } ?? "--",
+                    color: result.averageTradeReturnPercentage.map(profitColor) ?? .secondary
+                )
+                backtestComparisonRow(
+                    title: "勝ち / 負け",
+                    value: "\(result.winCount) / \(result.trades.count - result.winCount)",
+                    color: .primary
+                )
+            }
+
+            if let position = result.openPosition {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("保有中（勝率には未算入）")
+                            .font(.subheadline.weight(.semibold))
+                        Text("\(position.buyDate, format: .dateTime.year().month().day()) に \(priceText(position.buyPrice)) で買い ・ 評価損益 \(signedPercentageText(position.returnPercentage))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            if !result.trades.isEmpty {
+                DisclosureGroup("取引履歴（直近最大10件）") {
+                    VStack(spacing: 0) {
+                        ForEach(Array(result.trades.suffix(10).reversed())) { trade in
+                            tradeRow(trade)
+                            if trade.id != result.trades.suffix(10).first?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .font(.subheadline)
+            } else {
+                Text("条件を満たす決済済み取引はありません。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func backtestMetric(title: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline)
+                .foregroundStyle(color)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func backtestComparisonRow(title: String, value: String, color: Color) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .fontWeight(.semibold)
+                .foregroundStyle(color)
+        }
+        .font(.subheadline)
+    }
+
+    private func tradeRow(_ trade: RSIBacktester.Trade) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(trade.buyDate, format: .dateTime.year().month().day()) → \(trade.sellDate, format: .dateTime.year().month().day())")
+                    .font(.caption)
+                Text("\(priceText(trade.buyPrice)) → \(priceText(trade.sellPrice))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(signedPercentageText(trade.returnPercentage))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(profitColor(trade.returnPercentage))
+        }
+        .padding(.vertical, 7)
+    }
+
     private func loadStock() async {
         targetPrice = nil
         targetErrorMessage = nil
+        backtestResult = nil
+        backtestErrorMessage = nil
         selectedChartDate = nil
         await viewModel.load(code: stockCode)
         if !viewModel.prices.isEmpty {
             calculateTargetPrice()
+            calculateBacktest()
         }
+    }
+
+    private func calculateBacktest() {
+        backtestResult = nil
+        backtestErrorMessage = nil
+
+        guard let buyRSI = parsedRSI(buyRSIText),
+              let sellRSI = parsedRSI(sellRSIText) else {
+            backtestErrorMessage = "買い・売りRSIは0〜100の数値で入力してください。"
+            return
+        }
+        guard buyRSI < sellRSI else {
+            backtestErrorMessage = "買いRSIは売りRSIより小さくしてください。"
+            return
+        }
+        guard let result = viewModel.backtest(
+            line: backtestLine,
+            range: backtestRange,
+            buyThreshold: buyRSI,
+            sellThreshold: sellRSI
+        ) else {
+            backtestErrorMessage = "バックテストに必要な株価データが不足しています。"
+            return
+        }
+        backtestResult = result
     }
 
     private func calculateTargetPrice() {
@@ -601,6 +946,38 @@ struct RSIChartScreen: View {
         targetPrice = calculatedPrice
     }
 
+    @ViewBuilder
+    private func keyboardToolbar(
+        using proxy: ScrollViewProxy,
+        fields: [RSIInputField]
+    ) -> some View {
+        if keyboardIsPresented {
+            let previous = adjacentField(offset: -1, in: fields)
+            let next = adjacentField(offset: 1, in: fields)
+            RSIKeyboardToolbar(
+                canGoPrevious: previous != nil,
+                canGoNext: next != nil,
+                onPrevious: { moveFocus(to: previous, using: proxy) },
+                onNext: { moveFocus(to: next, using: proxy) },
+                onDone: { focusedField = nil }
+            )
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func adjacentField(
+        offset: Int,
+        in fields: [RSIInputField]
+    ) -> RSIInputField? {
+        guard let focusedField,
+              let currentIndex = fields.firstIndex(of: focusedField) else {
+            return nil
+        }
+        let targetIndex = currentIndex + offset
+        guard fields.indices.contains(targetIndex) else { return nil }
+        return fields[targetIndex]
+    }
+
     private func moveFocus(to field: RSIInputField?, using proxy: ScrollViewProxy) {
         guard let field else { return }
         withAnimation(.easeOut(duration: 0.2)) {
@@ -615,6 +992,29 @@ struct RSIChartScreen: View {
         return points.min {
             abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
         }
+    }
+
+    private func parsedRSI(_ text: String) -> Double? {
+        let normalizedText = text
+            .replacingOccurrences(of: "．", with: ".")
+            .replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Double(normalizedText), (0...100).contains(value) else { return nil }
+        return value
+    }
+
+    private func percentageText(_ value: Double) -> String {
+        "\(value.formatted(.number.precision(.fractionLength(1))))%"
+    }
+
+    private func signedPercentageText(_ value: Double) -> String {
+        "\(value >= 0 ? "+" : "")\(value.formatted(.number.precision(.fractionLength(2))))%"
+    }
+
+    private func profitColor(_ value: Double) -> Color {
+        if value > 0 { return .red }
+        if value < 0 { return .blue }
+        return .secondary
     }
 
     private func priceText(_ price: Double) -> String {
