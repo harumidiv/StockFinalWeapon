@@ -18,6 +18,7 @@ enum RSIBacktester {
 
         var id: Date { sellDate }
         var returnPercentage: Double { (sellPrice / buyPrice - 1) * 100 }
+        var holdingDays: Int { RSIBacktester.dayCount(from: buyDate, to: sellDate) }
     }
 
     struct OpenPosition {
@@ -28,11 +29,16 @@ enum RSIBacktester {
         let latestPrice: Double
 
         var returnPercentage: Double { (latestPrice / buyPrice - 1) * 100 }
+        var holdingDays: Int { RSIBacktester.dayCount(from: buyDate, to: latestDate) }
     }
 
     struct Result {
         let startDate: Date
         let endDate: Date
+        let period: Int
+        let method: RSICalculator.Method
+        let buyThreshold: Double
+        let sellThreshold: Double
         let trades: [Trade]
         let openPosition: OpenPosition?
         let totalReturnPercentage: Double
@@ -51,6 +57,11 @@ enum RSIBacktester {
         var averageTradeReturnPercentage: Double? {
             guard !trades.isEmpty else { return nil }
             return trades.map(\.returnPercentage).reduce(0, +) / Double(trades.count)
+        }
+
+        var averageHoldingDays: Double? {
+            guard !trades.isEmpty else { return nil }
+            return Double(trades.map(\.holdingDays).reduce(0, +)) / Double(trades.count)
         }
     }
 
@@ -138,11 +149,23 @@ enum RSIBacktester {
         return Result(
             startDate: dates[firstIndex],
             endDate: latestDate,
+            period: period,
+            method: method,
+            buyThreshold: buyThreshold,
+            sellThreshold: sellThreshold,
             trades: trades,
             openPosition: openPosition,
             totalReturnPercentage: (totalGrowth - 1) * 100,
             realizedReturnPercentage: (realizedGrowth - 1) * 100,
             buyAndHoldReturnPercentage: (latestPrice / closes[firstIndex] - 1) * 100
         )
+    }
+
+    /// 購入日から売却日（または最新日）までの暦日数。
+    private static func dayCount(from startDate: Date, to endDate: Date) -> Int {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: startDate)
+        let end = calendar.startOfDay(for: endDate)
+        return max(0, calendar.dateComponents([.day], from: start, to: end).day ?? 0)
     }
 }

@@ -154,11 +154,17 @@ private final class RSIChartViewModel: ObservableObject {
     var latestDate: Date? { prices.last?.date }
     var isTokyoStock: Bool { loadedIdentifier.hasSuffix(".T") }
 
+    func hasCachedPrices(for code: String) -> Bool {
+        guard let identifier = Self.normalizedIdentifier(from: code) else { return false }
+        return !prices.isEmpty && loadedIdentifier == identifier
+    }
+
     func load(code: String) async {
         guard let identifier = Self.normalizedIdentifier(from: code) else {
             errorMessage = "銘柄コードを入力してください。"
             return
         }
+        guard !hasCachedPrices(for: code) else { return }
 
         isLoading = true
         errorMessage = nil
@@ -275,6 +281,536 @@ private final class RSIChartViewModel: ObservableObject {
         if trimmed.contains(".") { return trimmed }
         if trimmed.first?.isNumber == true { return "\(trimmed).T" }
         return trimmed
+    }
+}
+
+private struct RSITradePriceWindow {
+    let prices: [RSIDailyPrice]
+    let tradingDaysBefore: Int
+    let tradingDaysAfter: Int
+}
+
+private struct InteractivePopGestureDisabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> GestureController {
+        GestureController()
+    }
+
+    func updateUIViewController(_ uiViewController: GestureController, context: Context) {
+        DispatchQueue.main.async {
+            uiViewController.disableInteractivePopGesture()
+        }
+    }
+
+    static func dismantleUIViewController(_ uiViewController: GestureController, coordinator: ()) {
+        uiViewController.restoreInteractivePopGesture()
+    }
+
+    final class GestureController: UIViewController {
+        private weak var popGestureRecognizer: UIGestureRecognizer?
+        private var previousIsEnabled: Bool?
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            disableInteractivePopGesture()
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            restoreInteractivePopGesture()
+            super.viewWillDisappear(animated)
+        }
+
+        func disableInteractivePopGesture() {
+            guard let gestureRecognizer = enclosingNavigationController()?
+                .interactivePopGestureRecognizer else {
+                return
+            }
+            if popGestureRecognizer !== gestureRecognizer {
+                popGestureRecognizer = gestureRecognizer
+                previousIsEnabled = gestureRecognizer.isEnabled
+            }
+            gestureRecognizer.isEnabled = false
+        }
+
+        func restoreInteractivePopGesture() {
+            guard let popGestureRecognizer, let previousIsEnabled else { return }
+            popGestureRecognizer.isEnabled = previousIsEnabled
+            self.popGestureRecognizer = nil
+            self.previousIsEnabled = nil
+        }
+
+        private func enclosingNavigationController() -> UINavigationController? {
+            var current: UIViewController? = self
+            while let controller = current {
+                if let navigationController = controller as? UINavigationController {
+                    return navigationController
+                }
+                if let navigationController = controller.navigationController {
+                    return navigationController
+                }
+                current = controller.parent
+            }
+            return nil
+        }
+    }
+}
+
+private struct RSITradeDetailScreen: View {
+    let trade: RSIBacktester.Trade
+    let allPrices: [RSIDailyPrice]
+    let identifier: String
+    let isTokyoStock: Bool
+    let rsiPeriod: Int
+    let rsiMethod: RSICalculator.Method
+    let buyThreshold: Double
+    let sellThreshold: Double
+
+    @State private var selectedChartDate: Date?
+
+    private let surroundingTradingDays = 10
+
+    private var persistentChartSelection: Binding<Date?> {
+        Binding(
+            get: { selectedChartDate },
+            set: { newDate in
+                // 指を離した際の nil は無視し、最後に選んだ日付の線を残す。
+                if let newDate {
+                    selectedChartDate = newDate
+                }
+            }
+        )
+    }
+
+    private var priceWindow: RSITradePriceWindow {
+        let calendar = Calendar.current
+        guard let buyIndex = allPrices.firstIndex(where: {
+            calendar.isDate($0.date, inSameDayAs: trade.buyDate)
+        }), let sellIndex = allPrices.firstIndex(where: {
+            calendar.isDate($0.date, inSameDayAs: trade.sellDate)
+        }) else {
+            return RSITradePriceWindow(
+                prices: allPrices.filter { $0.date >= trade.buyDate && $0.date <= trade.sellDate },
+                tradingDaysBefore: 0,
+                tradingDaysAfter: 0
+            )
+        }
+
+        let lowerBound = max(allPrices.startIndex, buyIndex - surroundingTradingDays)
+        let upperBound = min(allPrices.index(before: allPrices.endIndex), sellIndex + surroundingTradingDays)
+        return RSITradePriceWindow(
+            prices: Array(allPrices[lowerBound...upperBound]),
+            tradingDaysBefore: buyIndex - lowerBound,
+            tradingDaysAfter: upperBound - sellIndex
+        )
+    }
+
+    private var selectedPoint: RSIDailyPrice? {
+        guard let selectedChartDate else { return nil }
+        return priceWindow.prices.min {
+            abs($0.date.timeIntervalSince(selectedChartDate)) <
+                abs($1.date.timeIntervalSince(selectedChartDate))
+        }
+    }
+
+    private var rsiPoints: [RSIChartPoint] {
+        guard let firstDate = priceWindow.prices.first?.date,
+              let lastDate = priceWindow.prices.last?.date else {
+            return []
+        }
+
+        let values = RSICalculator.rsiSeries(
+            closes: allPrices.map(\.adjustedClose),
+            period: rsiPeriod,
+            method: rsiMethod
+        )
+        return zip(allPrices, values).compactMap { price, value in
+            guard price.date >= firstDate,
+                  price.date <= lastDate,
+                  let value else {
+                return nil
+            }
+            return RSIChartPoint(date: price.date, close: price.adjustedClose, value: value)
+        }
+    }
+
+    private var selectedRSIPoint: RSIChartPoint? {
+        guard let selectedChartDate else { return nil }
+        return rsiPoints.min {
+            abs($0.date.timeIntervalSince(selectedChartDate)) <
+                abs($1.date.timeIntervalSince(selectedChartDate))
+        }
+    }
+
+    private var yDomain: ClosedRange<Double> {
+        let values = priceWindow.prices.map(\.adjustedClose)
+        guard let minimum = values.min(), let maximum = values.max() else { return 0...1 }
+        let padding = max((maximum - minimum) * 0.08, maximum * 0.01)
+        return max(0, minimum - padding)...(maximum + padding)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                tradeSummaryCard
+                priceChartCard
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("取引詳細")
+        .navigationBarTitleDisplayMode(.inline)
+        .background(InteractivePopGestureDisabler())
+    }
+
+    private var tradeSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(identifier)
+                        .font(.headline)
+                    Text("購入日から売却日までの暦日数")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text("\(trade.holdingDays)日間")
+                    .font(.title2.bold())
+            }
+
+            HStack(spacing: 8) {
+                detailMetric(
+                    title: "取引損益",
+                    value: signedPercentageText(trade.returnPercentage),
+                    color: profitColor(trade.returnPercentage)
+                )
+                detailMetric(
+                    title: "値幅",
+                    value: signedPriceText(trade.sellPrice - trade.buyPrice),
+                    color: profitColor(trade.sellPrice - trade.buyPrice)
+                )
+            }
+
+            Divider()
+
+            executionDetail(
+                title: "購入",
+                systemImage: "arrow.down.circle.fill",
+                date: trade.buyDate,
+                price: trade.buyPrice,
+                rsi: trade.buyRSI,
+                color: .blue
+            )
+            executionDetail(
+                title: "売却",
+                systemImage: "arrow.up.circle.fill",
+                date: trade.sellDate,
+                price: trade.sellPrice,
+                rsi: trade.sellRSI,
+                color: .red
+            )
+        }
+        .cardStyle()
+    }
+
+    private var priceChartCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("取引前後の株価・RSI")
+                .font(.headline)
+
+            Text("調整後終値")
+                .font(.subheadline.weight(.semibold))
+
+            selectedPriceSummary
+
+            HStack(spacing: 14) {
+                thresholdLabel("購入日", color: .blue)
+                thresholdLabel("売却日", color: .red)
+            }
+
+            Chart {
+                ForEach(priceWindow.prices) { price in
+                    LineMark(
+                        x: .value("日付", price.date),
+                        y: .value("調整後終値", price.adjustedClose)
+                    )
+                    .foregroundStyle(.green)
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+                }
+
+                RuleMark(x: .value("購入日", trade.buyDate))
+                    .foregroundStyle(.blue)
+                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
+
+                RuleMark(x: .value("売却日", trade.sellDate))
+                    .foregroundStyle(.red)
+                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
+
+                PointMark(
+                    x: .value("購入日", trade.buyDate),
+                    y: .value("購入価格", trade.buyPrice)
+                )
+                .foregroundStyle(.blue)
+                .symbolSize(65)
+
+                PointMark(
+                    x: .value("売却日", trade.sellDate),
+                    y: .value("売却価格", trade.sellPrice)
+                )
+                .foregroundStyle(.red)
+                .symbolSize(65)
+
+                if let selectedPoint {
+                    RuleMark(x: .value("選択日", selectedPoint.date))
+                        .foregroundStyle(.secondary.opacity(0.7))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    PointMark(
+                        x: .value("選択日", selectedPoint.date),
+                        y: .value("選択日の調整後終値", selectedPoint.adjustedClose)
+                    )
+                    .foregroundStyle(.primary)
+                    .symbolSize(45)
+                }
+            }
+            .chartYScale(domain: yDomain)
+            .chartYAxis {
+                AxisMarks(position: .leading)
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 5)) {
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel(format: .dateTime.year().month().day())
+                }
+            }
+            .chartXSelection(value: persistentChartSelection)
+            .frame(height: 280)
+            .accessibilityLabel("購入日と売却日を示した調整後終値チャート")
+
+            Label("左右になぞると日付ごとの株価を確認できます。", systemImage: "hand.draw")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("購入前\(priceWindow.tradingDaysBefore)取引日・売却後\(priceWindow.tradingDaysAfter)取引日を含む調整後終値です。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Divider()
+                .padding(.vertical, 4)
+
+            rsiChartSection
+        }
+        .cardStyle()
+    }
+
+    private var selectedPriceSummary: some View {
+        HStack(spacing: 12) {
+            if let selectedPoint {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("選択日")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(selectedPoint.date, format: .dateTime.year().month().day())
+                        .font(.subheadline.weight(.semibold))
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("調整後終値")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(priceText(selectedPoint.adjustedClose))
+                        .font(.headline)
+                }
+            } else {
+                Label("チャートを左右になぞると値を確認できます。", systemImage: "hand.draw")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private var rsiChartSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("RSI（\(rsiPeriod)日・\(rsiMethod.title)方式）")
+                    .font(.subheadline.weight(.semibold))
+
+                Spacer()
+
+                if let selectedRSIPoint {
+                    Text(selectedRSIPoint.value, format: .number.precision(.fractionLength(1)))
+                        .font(.headline)
+                }
+            }
+
+            HStack(spacing: 14) {
+                thresholdLabel(
+                    "買い ≤ \(buyThreshold.formatted(.number.precision(.fractionLength(1))))",
+                    color: .blue
+                )
+                thresholdLabel(
+                    "売り ≥ \(sellThreshold.formatted(.number.precision(.fractionLength(1))))",
+                    color: .red
+                )
+            }
+
+            Chart {
+                RuleMark(y: .value("買い閾値", buyThreshold))
+                    .foregroundStyle(.blue.opacity(0.55))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 3]))
+
+                RuleMark(y: .value("売り閾値", sellThreshold))
+                    .foregroundStyle(.red.opacity(0.55))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 3]))
+
+                ForEach(rsiPoints) { point in
+                    LineMark(
+                        x: .value("日付", point.date),
+                        y: .value("RSI", point.value)
+                    )
+                    .foregroundStyle(.orange)
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+                }
+
+                RuleMark(x: .value("購入日", trade.buyDate))
+                    .foregroundStyle(.blue)
+                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
+
+                RuleMark(x: .value("売却日", trade.sellDate))
+                    .foregroundStyle(.red)
+                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
+
+                PointMark(
+                    x: .value("購入日", trade.buyDate),
+                    y: .value("購入時RSI", trade.buyRSI)
+                )
+                .foregroundStyle(.blue)
+                .symbolSize(65)
+
+                PointMark(
+                    x: .value("売却日", trade.sellDate),
+                    y: .value("売却時RSI", trade.sellRSI)
+                )
+                .foregroundStyle(.red)
+                .symbolSize(65)
+
+                if let selectedRSIPoint {
+                    RuleMark(x: .value("選択日", selectedRSIPoint.date))
+                        .foregroundStyle(.secondary.opacity(0.7))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    PointMark(
+                        x: .value("選択日", selectedRSIPoint.date),
+                        y: .value("選択日のRSI", selectedRSIPoint.value)
+                    )
+                    .foregroundStyle(.primary)
+                    .symbolSize(45)
+                }
+            }
+            .chartYScale(domain: 0...100)
+            .chartYAxis {
+                AxisMarks(position: .leading, values: [0, 25, 50, 75, 100])
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 5)) {
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel(format: .dateTime.year().month().day())
+                }
+            }
+            .chartXSelection(value: persistentChartSelection)
+            .frame(height: 220)
+            .accessibilityLabel("購入日と売却日、売買閾値を示したRSIチャート")
+
+            Text("株価チャートと日付選択が連動します。青線が購入日、赤線が売却日です。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func thresholdLabel(_ title: String, color: Color) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+        }
+        .font(.caption)
+        .foregroundStyle(color)
+    }
+
+    private func detailMetric(title: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline)
+                .foregroundStyle(color)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func executionDetail(
+        title: String,
+        systemImage: String,
+        date: Date,
+        price: Double,
+        rsi: Double,
+        color: Color
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(color)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(title) ・ \(date.formatted(.dateTime.year().month().day()))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(priceText(price))
+                    .font(.headline)
+            }
+
+            Spacer()
+
+            Text("RSI \(rsi.formatted(.number.precision(.fractionLength(1))))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func signedPercentageText(_ value: Double) -> String {
+        "\(value >= 0 ? "+" : "")\(value.formatted(.number.precision(.fractionLength(2))))%"
+    }
+
+    private func signedPriceText(_ value: Double) -> String {
+        "\(value >= 0 ? "+" : "")\(priceText(value))"
+    }
+
+    private func profitColor(_ value: Double) -> Color {
+        if value > 0 { return .red }
+        if value < 0 { return .blue }
+        return .secondary
+    }
+
+    private func priceText(_ price: Double) -> String {
+        let number = price.formatted(
+            .number
+                .grouping(.automatic)
+                .precision(.fractionLength(2))
+        )
+        return isTokyoStock ? "\(number)円" : number
     }
 }
 
@@ -749,6 +1285,13 @@ struct RSIChartScreen: View {
                     color: result.averageTradeReturnPercentage.map(profitColor) ?? .secondary
                 )
                 backtestComparisonRow(
+                    title: "平均保有日数",
+                    value: result.averageHoldingDays.map {
+                        "\($0.formatted(.number.precision(.fractionLength(1))))日"
+                    } ?? "--",
+                    color: .primary
+                )
+                backtestComparisonRow(
                     title: "勝ち / 負け",
                     value: "\(result.winCount) / \(result.trades.count - result.winCount)",
                     color: .primary
@@ -765,7 +1308,7 @@ struct RSIChartScreen: View {
                         Text("購入: \(position.buyDate, format: .dateTime.year().month().day()) ・ \(priceText(position.buyPrice)) ・ RSI \(position.buyRSI, format: .number.precision(.fractionLength(1)))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("最新評価: \(position.latestDate, format: .dateTime.year().month().day()) ・ \(priceText(position.latestPrice)) ・ 損益 \(signedPercentageText(position.returnPercentage))")
+                        Text("最新評価: \(position.latestDate, format: .dateTime.year().month().day()) ・ 保有\(position.holdingDays)日間 ・ \(priceText(position.latestPrice)) ・ 損益 \(signedPercentageText(position.returnPercentage))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -780,7 +1323,22 @@ struct RSIChartScreen: View {
                         .font(.subheadline.weight(.semibold))
 
                     ForEach(Array(result.trades.reversed())) { trade in
-                        tradeRow(trade)
+                        NavigationLink {
+                            RSITradeDetailScreen(
+                                trade: trade,
+                                allPrices: viewModel.prices,
+                                identifier: viewModel.loadedIdentifier,
+                                isTokyoStock: viewModel.isTokyoStock,
+                                rsiPeriod: result.period,
+                                rsiMethod: result.method,
+                                buyThreshold: result.buyThreshold,
+                                sellThreshold: result.sellThreshold
+                            )
+                        } label: {
+                            tradeRow(trade)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("取引前後の株価チャートを表示します")
                     }
                 }
             } else {
@@ -840,13 +1398,28 @@ struct RSIChartScreen: View {
             Divider()
 
             HStack {
-                Text("取引損益")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("保有日数")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("\(trade.holdingDays)日間")
+                        .font(.subheadline.weight(.semibold))
+                }
+
                 Spacer()
-                Text(signedPercentageText(trade.returnPercentage))
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(profitColor(trade.returnPercentage))
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("取引損益")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(signedPercentageText(trade.returnPercentage))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(profitColor(trade.returnPercentage))
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
             }
         }
         .padding(12)
@@ -885,6 +1458,9 @@ struct RSIChartScreen: View {
     }
 
     private func loadStock() async {
+        // 詳細画面や別タブから戻っただけなら、取得済みの同一銘柄をそのまま使う。
+        guard !viewModel.hasCachedPrices(for: stockCode) else { return }
+
         targetPrice = nil
         targetErrorMessage = nil
         backtestResult = nil
