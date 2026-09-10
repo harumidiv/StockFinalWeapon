@@ -35,6 +35,10 @@ enum RSIBacktester {
     struct Result {
         let startDate: Date
         let endDate: Date
+        let period: Int
+        let method: RSICalculator.Method
+        let buyThreshold: Double
+        let sellThreshold: Double
         let trades: [Trade]
         let openPosition: OpenPosition?
         let totalReturnPercentage: Double
@@ -145,6 +149,10 @@ enum RSIBacktester {
         return Result(
             startDate: dates[firstIndex],
             endDate: latestDate,
+            period: period,
+            method: method,
+            buyThreshold: buyThreshold,
+            sellThreshold: sellThreshold,
             trades: trades,
             openPosition: openPosition,
             totalReturnPercentage: (totalGrowth - 1) * 100,
