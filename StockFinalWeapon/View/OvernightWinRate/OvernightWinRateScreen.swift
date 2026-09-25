@@ -259,7 +259,7 @@ extension OvernightWinRateResult {
     ///                指定時は開始時にその金額で買える整数単元（100株単位・最低1単元）を建玉の基準とし、
     ///                単利の固定株数・複利の初期資金・ずっと保有の株数すべてに反映する。
     ///   - leverage: 信用取引のレバレッジ倍率（1.0〜3.0）。建玉を倍にして損益・金利を膨らませる。
-    ///               ベンチマークの「ずっと保有」には掛けない。
+    ///               ベンチマークの「ずっと保有」にも同じ倍率を適用する。
     static func make(code: String, candles: [MyStockChartData], strategy: WinRateStrategy, compounding: Bool, lotSize: Int, principal: Double? = nil, leverage: Double = 1.0, restrictStart: Date? = nil, restrictEnd: Date? = nil) -> OvernightWinRateResult? {
         // 有効な始値・終値のみを日付昇順に整理し、必要なら期間を制限する
         let bars = candles
@@ -322,6 +322,7 @@ extension OvernightWinRateResult {
             startDate: bars[0].date,
             initialCapital: initialCapital,
             shares: shares,
+            buyAndHoldStartPrice: Double(firstClose),
             compounding: useCompounding,
             lotSize: lotSize,
             leverage: leverage
@@ -468,7 +469,7 @@ extension OvernightWinRateResult {
     /// - 建玉株数: 複利=資金で買える整数単位ぶん / 単利=100株固定。いずれもレバレッジ倍する。
     /// - レバレッジ: 自己資金（元本）は変えず、建玉だけを leverage 倍にする（信用取引）。
     ///   損益・信用金利がそのぶん膨らむ。ベンチマークの「ずっと保有」にも同倍率を掛け、
-    ///   借入ぶん（元本×(レバ-1)）に保有日数ぶんの信用金利をかけ、逆行で評価額が0以下になれば
+    ///   借入ぶん（実際の購入額×(レバ-1)）に保有日数ぶんの信用金利をかけ、逆行で評価額が0以下になれば
     ///   保有側もロスカット＝再起不能とする。レバ1倍のときは現物どおり（金利・破産なし）。
     /// - 信用取引なので、初期資金が1単位に満たなくても最低1単位は建てる（不足分は信用＝マージン）
     /// - 手取り: 金利を引いた後、含み益にのみ課税し、損失は満額負担
@@ -477,6 +478,7 @@ extension OvernightWinRateResult {
         startDate: Date,
         initialCapital: Double,
         shares: Double,
+        buyAndHoldStartPrice: Double,
         compounding: Bool,
         lotSize: Int,
         leverage: Double = 1.0
@@ -486,8 +488,12 @@ extension OvernightWinRateResult {
         let lev = max(1.0, leverage)   // レバレッジ倍率（最低1倍）
 
         let calendar = Calendar.current
-        // ずっと保有をレバレッジするときの借入額（元本×(レバ-1)）。レバ1倍なら0＝現物。
-        let holdBorrowed = initialCapital * (lev - 1)
+        // ずっと保有は100株単位で購入するため、指定元本と実際の購入額には端数が生じる。
+        // 余剰現金も評価額に残し、開始時点の評価額が必ず initialCapital と一致するようにする。
+        // レバレッジ分の借入額も元本全体ではなく、実際の購入額を基準にする。
+        let buyAndHoldCost = buyAndHoldStartPrice * shares
+        let buyAndHoldCash = initialCapital - buyAndHoldCost
+        let holdBorrowed = buyAndHoldCost * (lev - 1)
 
         var overnightEquity = initialCapital  // 戦略の評価額（コスト前・自己資金ベース）
         var cumulativeInterest = 0.0          // 累積の信用金利
@@ -501,15 +507,15 @@ extension OvernightWinRateResult {
         var holdRuined = false  // ずっと保有（レバあり）が再起不能になったか
         for t in trades {
             // ずっと保有の評価額（レバ適用・借入金利・ロスカット）。
-            //   評価額 = 建玉時価(株数×レバ) − 借入 − 借入への保有日数ぶんの金利
-            //   レバ1倍: 借入0・金利0 → 時価そのまま（＝従来の現物ベンチマーク）
+            //   評価額 = 建玉時価(株数×レバ) + 余剰現金 − 借入 − 借入への保有日数ぶんの金利
+            //   レバ1倍: 借入0・金利0 → 保有株の時価 + 余剰現金
             let buyAndHoldEquity: Double
             if holdRuined {
                 buyAndHoldEquity = 0
             } else {
                 let daysHeldTotal = max(0, calendar.dateComponents([.day], from: startDate, to: t.sellDate).day ?? 0)
                 let holdInterest = holdBorrowed * annualInterestRate * Double(daysHeldTotal) / 365.0
-                let eq = Double(t.sellClose) * shares * lev - holdBorrowed - holdInterest
+                let eq = Double(t.sellClose) * shares * lev + buyAndHoldCash - holdBorrowed - holdInterest
                 if eq <= 0 {
                     holdRuined = true   // 保有中に元本を割り込んだ＝ロスカットで退場
                     buyAndHoldEquity = 0
@@ -618,6 +624,7 @@ extension OvernightWinRateResult {
             startDate: bars.first?.date ?? Date(),
             initialCapital: initialCapital,
             shares: shares,
+            buyAndHoldStartPrice: Double(bars.first?.close ?? 0),
             compounding: isCompounding,
             lotSize: lotSize,
             leverage: leverage
@@ -648,6 +655,7 @@ extension OvernightWinRateResult {
             startDate: startDate,
             initialCapital: initialCapital,
             shares: shares,
+            buyAndHoldStartPrice: Double(bars.first?.close ?? 0),
             compounding: isCompounding,
             lotSize: lotSize,
             leverage: leverage
@@ -1346,6 +1354,181 @@ struct OvernightCompareTable: View {
     }
 }
 
+/// 月別成績から遷移する、年ごとの同月成績。
+/// 例: 1月を選んだ場合、2025年1月・2026年1月をそれぞれ1行にする。
+private struct OvernightYearMonthPerformance: Identifiable {
+    var id: Int { year }
+    let year: Int
+    let month: Int
+    let trades: Int
+    let winRate: Double
+    let averageReturn: Double
+    let totalReturn: Double
+
+    var label: String { "\(year)年\(month)月" }
+}
+
+/// 指定期間内にある同じ月の成績を、1年につき1行で表示する画面。
+private struct OvernightMonthlyPerformanceListScreen: View {
+    let result: OvernightWinRateResult
+    let month: Int
+
+    private var yearlyPerformance: [OvernightYearMonthPerformance] {
+        let calendar = Calendar.current
+        let targetTrades = result.trades.filter {
+            calendar.component(.month, from: $0.buyDate) == month
+        }
+        let grouped = Dictionary(grouping: targetTrades) {
+            calendar.component(.year, from: $0.buyDate)
+        }
+        let monthlyTotalPairs: [(Int, Double)] = (result.periodPerformance[.month] ?? [])
+            .compactMap { performance -> (Int, Double)? in
+                let components = performance.id.split(separator: "-")
+                guard components.count == 2,
+                      let year = Int(components[0]),
+                      let performanceMonth = Int(components[1]),
+                      performanceMonth == month else { return nil }
+                return (year, performance.overnightProfitPercent)
+            }
+        let monthlyTotals = Dictionary(uniqueKeysWithValues: monthlyTotalPairs)
+
+        return grouped.compactMap { year, trades in
+            guard !trades.isEmpty else { return nil }
+            let wins = trades.filter { $0.sell > $0.buy }.count
+            let returnSum = trades.reduce(0.0) { sum, trade in
+                sum + Double(trade.sell - trade.buy) / Double(trade.buy) * 100
+            }
+            return OvernightYearMonthPerformance(
+                year: year,
+                month: month,
+                trades: trades.count,
+                winRate: Double(wins) / Double(trades.count) * 100,
+                averageReturn: returnSum / Double(trades.count),
+                totalReturn: monthlyTotals[year] ?? returnSum
+            )
+        }
+        .sorted { $0.year < $1.year }
+    }
+
+    private var monthlyPerformance: OvernightMonthlyPerformance? {
+        result.monthlyPerformance.first { $0.month == month }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                if let performance = monthlyPerformance {
+                    HStack {
+                        summaryCell(title: "回数", value: "\(performance.trades)回", color: .primary)
+                        summaryCell(
+                            title: "勝率",
+                            value: String(format: "%.1f%%", performance.winRate),
+                            color: performance.winRate >= 50 ? .red : .blue
+                        )
+                        summaryCell(
+                            title: "平均損益率",
+                            value: String(format: "%+.3f%%", performance.averageReturn),
+                            color: performance.averageReturn >= 0 ? .red : .blue
+                        )
+                    }
+                    .padding(.vertical, 4)
+                }
+            } header: {
+                if let start = result.startDate, let end = result.endDate {
+                    Text("\(OvernightWinRateResultCard.dateText(start)) 〜 \(OvernightWinRateResultCard.dateText(end))")
+                }
+            }
+
+            Section {
+                ScrollView(.horizontal, showsIndicators: yearlyPerformance.count > 6) {
+                    Chart {
+                        ForEach(yearlyPerformance) { performance in
+                            BarMark(
+                                x: .value("年", String(performance.year)),
+                                y: .value("月間合計損益率", performance.totalReturn)
+                            )
+                            .foregroundStyle(performance.totalReturn >= 0 ? Color.red : Color.blue)
+                            .annotation(position: performance.totalReturn >= 0 ? .top : .bottom) {
+                                Text(String(format: "%+.2f%%", performance.totalReturn))
+                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(performance.totalReturn >= 0 ? .red : .blue)
+                            }
+                        }
+
+                        RuleMark(y: .value("損益ゼロ", 0))
+                            .foregroundStyle(Color.secondary.opacity(0.5))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    }
+                    .chartYAxis {
+                        AxisMarks { value in
+                            AxisGridLine()
+                            AxisValueLabel {
+                                if let percent = value.as(Double.self) {
+                                    Text(String(format: "%.1f%%", percent))
+                                }
+                            }
+                        }
+                    }
+                    .frame(
+                        width: max(300, CGFloat(yearlyPerformance.count) * 64),
+                        height: 220
+                    )
+                    .padding(.vertical, 8)
+                }
+            } header: {
+                Text("\(month)月・年ごとの月間合計損益率")
+            }
+
+            Section {
+                HStack {
+                    Text("年月").frame(width: 92, alignment: .leading)
+                    Text("回数").frame(maxWidth: .infinity, alignment: .trailing)
+                    Text("勝率").frame(maxWidth: .infinity, alignment: .trailing)
+                    Text("平均損益率").frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+
+                ForEach(yearlyPerformance) { performance in
+                    HStack {
+                        Text(performance.label)
+                            .fontWeight(.semibold)
+                            .frame(width: 92, alignment: .leading)
+                        Text("\(performance.trades)")
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%.0f%%", performance.winRate))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(performance.winRate >= 50 ? .red : .blue)
+                        Text(String(format: "%+.3f%%", performance.averageReturn))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundColor(performance.averageReturn >= 0 ? .red : .blue)
+                    }
+                    .font(.system(size: 13, design: .monospaced))
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .navigationTitle("\(month)月の年別成績")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func summaryCell(title: String, value: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .foregroundColor(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+}
+
 /// 集計結果カード（入力画面・ランキング詳細画面で共用）
 struct OvernightWinRateResultCard: View {
     let result: OvernightWinRateResult
@@ -1694,7 +1877,7 @@ struct OvernightWinRateResultCard: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
-            Text("複数年ぶんの同じ月をまとめた勝率・平均。チェックを外した月は「その月は取引しない」として上部サマリー・期間別成績から除外される。")
+            Text("月名をタップすると、指定期間内の同じ月の成績を1年につき1行で確認できます。チェックを外した月は「その月は取引しない」として上部サマリー・期間別成績から除外されます。")
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
 
@@ -1727,33 +1910,44 @@ struct OvernightWinRateResultCard: View {
                     }
                     .buttonStyle(.plain)
 
-                VStack(spacing: 2) {
-                    // 上段: 月 / 回数 / 勝率 / 平均損益率
-                    HStack {
-                        Text(m.shortName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .frame(width: 44, alignment: .leading)
-                        Text("\(m.trades)")
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .foregroundColor(.secondary)
-                        Text(String(format: "%.0f%%", m.winRate))
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .foregroundColor(m.winRate >= 50 ? .red : .blue)
-                        Text(String(format: "%+.3f%%", m.averageReturn))
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .foregroundColor(m.averageReturn >= 0 ? .red : .blue)
-                    }
-                    .font(.system(size: 13, design: .monospaced))
+                    VStack(spacing: 2) {
+                        // 上段: 月 / 回数 / 勝率 / 平均損益率
+                        HStack {
+                            NavigationLink {
+                                OvernightMonthlyPerformanceListScreen(result: result, month: m.month)
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Text(m.shortName)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.secondary)
+                                }
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 44, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("\(m.shortName)の年別成績を表示")
+                            Text("\(m.trades)")
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .foregroundColor(.secondary)
+                            Text(String(format: "%.0f%%", m.winRate))
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .foregroundColor(m.winRate >= 50 ? .red : .blue)
+                            Text(String(format: "%+.3f%%", m.averageReturn))
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .foregroundColor(m.averageReturn >= 0 ? .red : .blue)
+                        }
+                        .font(.system(size: 13, design: .monospaced))
 
-                    // 下段: 平均利益 / 平均損失 / ペイオフ / 最大の負け
-                    HStack {
-                        Spacer().frame(width: 44)
-                        weekdaySubMetric(title: "平均利益", value: String(format: "%+.2f%%", m.averageWin))
-                        weekdaySubMetric(title: "平均損失", value: String(format: "%+.2f%%", m.averageLoss))
-                        weekdaySubMetric(title: "ペイオフ", value: m.payoffRatio.map { String(format: "%.2f", $0) } ?? "—")
-                        weekdaySubMetric(title: "最大の負け", value: String(format: "%.2f%%", m.worstReturn))
+                        // 下段: 平均利益 / 平均損失 / ペイオフ / 最大の負け
+                        HStack {
+                            Spacer().frame(width: 44)
+                            weekdaySubMetric(title: "平均利益", value: String(format: "%+.2f%%", m.averageWin))
+                            weekdaySubMetric(title: "平均損失", value: String(format: "%+.2f%%", m.averageLoss))
+                            weekdaySubMetric(title: "ペイオフ", value: m.payoffRatio.map { String(format: "%.2f", $0) } ?? "—")
+                            weekdaySubMetric(title: "最大の負け", value: String(format: "%.2f%%", m.worstReturn))
+                        }
                     }
-                }
                 }
                 .opacity(isSelected ? 1 : 0.4)
                 .padding(.vertical, 4)
