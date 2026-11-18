@@ -148,10 +148,10 @@ struct OvernightPeriodPerformance: Identifiable {
     let trades: Int              // その期間のトレード回数
     let winRate: Double          // その期間の勝率（％）
     let principal: Double        // その期間の元本（期首時点の税・金利控除後の評価額。前期間末の手取り評価額。最初は初期投資額）
-    let overnightProfit: Double  // その期間のオーバーナイト戦略損益（円）
-    let buyAndHoldProfit: Double // その期間の保有損益（円・100株、期首終値→期末終値）
+    let overnightProfit: Double  // その期間の税・金利控除後の戦略損益（円）
+    let buyAndHoldProfit: Double // その期間の保有評価額の増減（円）
     let overnightProfitPercent: Double  // その期間のオーバーナイト損益率（期首の評価額=元本に対する％）
-    let buyAndHoldProfitPercent: Double // その期間の保有損益率（期首終値に対する％）
+    let buyAndHoldProfitPercent: Double // その期間の保有損益率（期首の保有評価額に対する％）
     let buyPrice: Float?   // 買値（日単位=1トレードのときのみ意味を持つ）
     let sellPrice: Float?  // 売値（同上）
 }
@@ -398,12 +398,10 @@ extension OvernightWinRateResult {
                 bars: bars,
                 trades: trades,
                 equityCurve: equityCurve,
+                buyAndHoldCurve: equityCurve,
                 initialCapital: initialCapital,
-                shares: shares,
                 calendar: calendar,
-                breakdown: breakdown,
-                leverage: max(1.0, leverage),
-                holdRuinDate: buyAndHoldRuinDate
+                breakdown: breakdown
             )
         }
 
@@ -549,9 +547,11 @@ extension OvernightWinRateResult {
                 heldShares = shares * lev
             }
 
-            // 信用金利: 実際に建てた金額に対し、持ち越した日数ぶん課金（日計り=0日なので発生しない）
-            let notional = heldShares * Double(buy)
-            cumulativeInterest += notional * annualInterestRate * Double(t.daysHeld) / 365.0
+            // 信用で建てた金額に対し、持ち越した日数ぶん課金する（1倍は現物相当）。
+            if lev > 1 {
+                let notional = heldShares * Double(buy)
+                cumulativeInterest += notional * annualInterestRate * Double(t.daysHeld) / 365.0
+            }
 
             // 評価額の更新（複利=損益を再投資して建玉が育つ / 単利=100株固定の損益をキャッシュ加算）
             overnightEquity += heldShares * Double(sell - buy)
@@ -660,84 +660,69 @@ extension OvernightWinRateResult {
             lotSize: lotSize,
             leverage: leverage
         )
-        let holdRuinDate = equity.dropFirst().first(where: { $0.buyAndHold <= 0 })?.date
         return Self.buildPeriodPerformance(
             bars: bars,
             trades: filtered,
             equityCurve: equity,
+            buyAndHoldCurve: equityCurve,
             initialCapital: initialCapital,
-            shares: shares,
             calendar: calendar,
-            breakdown: breakdown,
-            leverage: leverage,
-            holdRuinDate: holdRuinDate
+            breakdown: breakdown
         )
     }
 
     /// 指定した集計単位（年/月/週/日）で成績を集計する。
     /// トレードは「買った日（エントリー日）」の属する期間に計上する（曜日別集計と基準をそろえる）。
     /// - トレード回数・勝ち・戦略損益は、そのトレードを「買った日」の期間へ
-    /// - 戦略損益は資産推移カーブの差分（＝各トレードの正確な損益。複利・単利どちらにも追従）
-    /// - 保有損益は各期間の「最初の終値→最後の終値」×レバレッジ（金利控除前の概算）。
-    ///   保有がロスカット（holdRuinDate）した以降の期間は0にする。
+    /// - 戦略損益は、期首と期末の税・金利控除後の評価額の差。
+    /// - 保有損益は、前期間末（初回は開始時）から当期間末までの保有評価額の差。
     private static func buildPeriodPerformance(
         bars: [(date: Date, open: Float, close: Float)],
         trades: [(buy: Float, sell: Float, buyDate: Date, sellDate: Date, sellClose: Float, daysHeld: Int)],
         equityCurve: [OvernightEquityPoint],
+        buyAndHoldCurve: [OvernightEquityPoint],
         initialCapital: Double,
-        shares: Double,
         calendar: Calendar,
-        breakdown: WinRateBreakdown,
-        leverage: Double = 1.0,
-        holdRuinDate: Date? = nil
+        breakdown: WinRateBreakdown
     ) -> [OvernightPeriodPerformance] {
-        let lev = max(1.0, leverage)
         // 期間バケットを作る（bars は日付昇順なので、初出順 = 時系列順）
-        // profitSum=そのバケットのトレード損益合計 / endNet=バケット内最後のトレード後の手取り評価額
-        // firstDate=バケット最初の日付（保有ロスカット後の期間を0にする判定に使う）
-        // buyPrice/sellPrice=バケット最初の買値・最後の売値（日単位=1トレードのとき、その日の売買値になる）
-        var buckets: [String: (label: String, trades: Int, wins: Int, profitSum: Double, endNet: Double?, firstDate: Date, firstClose: Float, lastClose: Float, buyPrice: Float?, sellPrice: Float?)] = [:]
+        var buckets: [String: (label: String, trades: Int, wins: Int, endNet: Double?, endHold: Double?, buyPrice: Float?, sellPrice: Float?)] = [:]
         var order: [String] = []
         for bar in bars {
             let k = breakdown.key(for: bar.date, calendar: calendar)
-            if var e = buckets[k] {
-                e.lastClose = bar.close
-                buckets[k] = e
-            } else {
-                buckets[k] = (label: breakdown.label(for: bar.date, calendar: calendar), trades: 0, wins: 0, profitSum: 0, endNet: nil, firstDate: bar.date, firstClose: bar.close, lastClose: bar.close, buyPrice: nil, sellPrice: nil)
+            if buckets[k] == nil {
+                buckets[k] = (label: breakdown.label(for: bar.date, calendar: calendar), trades: 0, wins: 0, endNet: nil, endHold: nil, buyPrice: nil, sellPrice: nil)
                 order.append(k)
             }
         }
-        // 各トレードの損益（資産カーブの差分）を「買った日」のバケットに計上
-        // equityCurve[0]=取引前, equityCurve[i+1]=トレードi決済後 なので、トレードiの損益 = 差分
-        for i in 0..<trades.count {
-            let t = trades[i]
+        // 保有は取引の除外に関係なく、各期間の最後の評価額を使う。
+        for point in buyAndHoldCurve {
+            let k = breakdown.key(for: point.date, calendar: calendar)
+            buckets[k]?.endHold = point.buyAndHold
+        }
+        // 決済後の評価額を「買った日」のバケットに計上する。
+        for (t, point) in zip(trades, equityCurve.dropFirst()) {
             let k = breakdown.key(for: t.buyDate, calendar: calendar)
             guard var e = buckets[k] else { continue }
-            let profit = equityCurve[i + 1].overnight - equityCurve[i].overnight
             e.trades += 1
             if t.sell > t.buy { e.wins += 1 }
-            e.profitSum += profit
-            e.endNet = equityCurve[i + 1].overnightNet
+            e.endNet = point.overnightNet
             if e.buyPrice == nil { e.buyPrice = t.buy }
             e.sellPrice = t.sell
             buckets[k] = e
         }
 
         var performance: [OvernightPeriodPerformance] = []
-        var previousEndEquity = initialCapital     // 期首の評価額（コスト前）
-        var previousEndNetEquity = initialCapital  // 期首の手取り評価額（表示用の元本）
+        var previousEndNetEquity = initialCapital
+        var previousEndHoldEquity = initialCapital
         for k in order {
             let e = buckets[k]!
-            let startEquity = previousEndEquity
             let startNetEquity = previousEndNetEquity
-            let overnightProfit = e.profitSum
-            previousEndEquity = startEquity + overnightProfit
-            if let en = e.endNet { previousEndNetEquity = en }
-            // ずっと保有（レバ適用・金利控除前の概算）。保有がロスカットした以降の期間は退場済みなので0。
-            let holdOut = holdRuinDate.map { e.firstDate > $0 } ?? false
-            let buyAndHoldProfit = holdOut ? 0 : Double(e.lastClose - e.firstClose) * shares * lev
-            let buyAndHoldProfitPercent = holdOut ? 0 : (e.firstClose != 0 ? Double(e.lastClose - e.firstClose) / Double(e.firstClose) * 100 * lev : 0)
+            let startHoldEquity = previousEndHoldEquity
+            previousEndNetEquity = e.endNet ?? startNetEquity
+            previousEndHoldEquity = e.endHold ?? startHoldEquity
+            let overnightProfit = previousEndNetEquity - startNetEquity
+            let buyAndHoldProfit = previousEndHoldEquity - startHoldEquity
             performance.append(
                 OvernightPeriodPerformance(
                     id: k,
@@ -747,8 +732,8 @@ extension OvernightWinRateResult {
                     principal: startNetEquity,
                     overnightProfit: overnightProfit,
                     buyAndHoldProfit: buyAndHoldProfit,
-                    overnightProfitPercent: startEquity != 0 ? overnightProfit / startEquity * 100 : 0,
-                    buyAndHoldProfitPercent: buyAndHoldProfitPercent,
+                    overnightProfitPercent: startNetEquity != 0 ? overnightProfit / startNetEquity * 100 : 0,
+                    buyAndHoldProfitPercent: startHoldEquity != 0 ? buyAndHoldProfit / startHoldEquity * 100 : 0,
                     buyPrice: e.buyPrice,
                     sellPrice: e.sellPrice
                 )
@@ -1393,7 +1378,7 @@ private struct OvernightMonthlyPerformanceListScreen: View {
         let monthlyTotals = Dictionary(uniqueKeysWithValues: monthlyTotalPairs)
 
         return grouped.compactMap { year, trades in
-            guard !trades.isEmpty else { return nil }
+            guard let totalReturn = monthlyTotals[year] else { return nil }
             let wins = trades.filter { $0.sell > $0.buy }.count
             let returnSum = trades.reduce(0.0) { sum, trade in
                 sum + Double(trade.sell - trade.buy) / Double(trade.buy) * 100
@@ -1404,7 +1389,7 @@ private struct OvernightMonthlyPerformanceListScreen: View {
                 trades: trades.count,
                 winRate: Double(wins) / Double(trades.count) * 100,
                 averageReturn: returnSum / Double(trades.count),
-                totalReturn: monthlyTotals[year] ?? returnSum
+                totalReturn: totalReturn
             )
         }
         .sorted { $0.year < $1.year }
@@ -1476,7 +1461,7 @@ private struct OvernightMonthlyPerformanceListScreen: View {
                     .padding(.vertical, 8)
                 }
             } header: {
-                Text("\(month)月・年ごとの月間合計損益率")
+                Text("\(month)月・年ごとの月間合計損益率（税・金利控除後）")
             }
 
             Section {
@@ -1542,17 +1527,6 @@ struct OvernightWinRateResultCard: View {
     /// 成績一覧の集計単位（年/月/週/日）
     @State private var breakdown: WinRateBreakdown = .year
 
-    /// チェックが入っている曜日だけのトレードを合算した平均損益率（％）。
-    /// トレード回数で重み付けするので「その曜日たちだけ売買した場合の実際の平均」になる。
-    private var selectedWeekdayAverage: Double? {
-        let selected = result.weekdayPerformance.filter { !excludedWeekdays.contains($0.weekday) }
-        let totalTrades = selected.reduce(0) { $0 + $1.trades }
-        guard totalTrades > 0 else { return nil }
-        // averageReturn(%) × trades = その曜日の損益率合計(%) なので、合計 ÷ 総回数で加重平均になる
-        let weightedSum = selected.reduce(0.0) { $0 + $1.averageReturn * Double($1.trades) }
-        return weightedSum / Double(totalTrades)
-    }
-
     /// 除外中の曜日名（月・火 …）を並べた文字列（成績一覧の注記用）
     private var excludedWeekdayNames: String {
         result.weekdayPerformance
@@ -1566,12 +1540,8 @@ struct OvernightWinRateResultCard: View {
         excludedMonths.sorted().map { "\($0)月" }.joined(separator: "・")
     }
 
-    /// 曜日・月チェックに連動した上部サマリー
-    private var summary: OvernightWinRateResult.FilteredSummary {
-        result.summary(excludingWeekdays: excludedWeekdays, excludingMonths: excludedMonths)
-    }
-
     var body: some View {
+        let summary = result.summary(excludingWeekdays: excludedWeekdays, excludingMonths: excludedMonths)
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("\(result.code)")
@@ -1625,7 +1595,7 @@ struct OvernightWinRateResultCard: View {
                 color: summary.averageReturn >= 0 ? .red : .blue
             )
             statRow(
-                label: (result.isCompounding ? "累積リターン（複利/\(result.lotSize)株単位" : "累積リターン（単利・100株固定") + leverageSuffix + "）",
+                label: (result.isCompounding ? "累積リターン（複利/\(result.lotSize)株単位" : "累積リターン（単利・\(sharesText)株") + leverageSuffix + "・控除前）",
                 value: String(format: "%+.2f%%", summary.cumulativeReturn),
                 color: summary.cumulativeReturn >= 0 ? .red : .blue
             )
@@ -1637,7 +1607,7 @@ struct OvernightWinRateResultCard: View {
 
             if !result.weekdayPerformance.isEmpty {
                 Divider()
-                weekdayList
+                weekdayList(selectedAverage: summary.totalTrades > 0 ? summary.averageReturn : nil)
             }
 
             // 月ごとの成績（季節性）は複数年ぶんのデータがある長期表示のときだけ出す
@@ -1751,7 +1721,7 @@ struct OvernightWinRateResultCard: View {
 
     /// 曜日ごとの平均損益率一覧（エントリー日=買った日の曜日で集計）
     @ViewBuilder
-    private var weekdayList: some View {
+    private func weekdayList(selectedAverage: Double?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("曜日ごとの成績（エントリー日の曜日）")
                 .font(.system(size: 13, weight: .semibold))
@@ -1761,13 +1731,13 @@ struct OvernightWinRateResultCard: View {
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
 
-            // チェックが入っている曜日だけを合算した平均損益率
+            // 選択中の曜日と月の取引を合算した平均損益率
             HStack {
                 Text("選択した曜日の平均損益率")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.secondary)
                 Spacer()
-                if let avg = selectedWeekdayAverage {
+                if let avg = selectedAverage {
                     Text(String(format: "%+.3f%%", avg))
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundColor(avg >= 0 ? .red : .blue)
@@ -2004,11 +1974,9 @@ struct OvernightWinRateResultCard: View {
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
-            if isLeveraged {
-                Text("※ レバ×\(Int(result.leverage))で計算。期間別の「ずっと保有」は金利控除前のレバ換算（概算）")
-                    .font(.system(size: 10))
-                    .foregroundColor(.orange)
-            }
+            Text("戦略損益は税・金利控除後。保有損益率は期首の保有評価額が基準。")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
 
             // ヘッダー
             HStack {
