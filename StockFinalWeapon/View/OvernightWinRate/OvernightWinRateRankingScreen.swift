@@ -44,7 +44,7 @@ struct TradingValueRankingFetcher {
     }
 
     /// scriptタグを走査し __PRELOADED_STATE__ JSON から順位・コード・銘柄名を抽出
-    private func extractEntries(from doc: Document) throws -> [Entry] {
+    private func extractEntries(from doc: SwiftSoup.Document) throws -> [Entry] {
         for script in try doc.select("script") {
             let content = try script.html()
             guard content.contains("__PRELOADED_STATE__"),

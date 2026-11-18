@@ -85,7 +85,7 @@ class StockViewModel: ObservableObject {
     }
     
     /// SwiftSoupでscriptタグを走査し __PRELOADED_STATE__ JSONからrank・codeを抽出
-    private func extractRankAndCodes(from doc: Document) throws -> [(rank: Int, code: String)] {
+    private func extractRankAndCodes(from doc: SwiftSoup.Document) throws -> [(rank: Int, code: String)] {
         for script in try doc.select("script") {
             let content = try script.html()
             guard content.contains("__PRELOADED_STATE__"),
